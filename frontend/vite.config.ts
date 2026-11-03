@@ -16,4 +16,9 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    exclude: ['maplibre-gl'],
+  },
+  ssr: {noExternal: ['maplibre-gl']},
 })
+//-----------------------------------------------------------------End of File----------------------------------------------------------------->
