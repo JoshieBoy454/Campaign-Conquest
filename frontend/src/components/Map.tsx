@@ -29,9 +29,20 @@ export default function Map() {
 
             // The container the HTML element that will contain the map: mapContainerRef
             container: mapContainerRef.current,
-            // Load the map style (colors, tiles etc.)
-            // Demo map style loaded in
-            style: "https://demotiles.maplibre.org/style.json",
+            // Style will be provided by the geojson file: countries.geojson
+            style: {
+                version: 8,
+                sources: {},
+                layers: [
+                    {
+                        id: "background",
+                        type: "background",
+                        paint:{
+                            "background-color": "#90D9ED",
+                        },
+                    },
+                ],
+            },
             // Starting position of the "camera" in [longiture, Latituder]
             center: [0, 20],
             // Starting zoom level
@@ -42,6 +53,45 @@ export default function Map() {
             maxZoom: 8,
             // Prevents the map from being rendered in multiple copies horizontally
             renderWorldCopies: false,
+        });
+
+        // Store the Map instance on a local variable: currentMap
+        // Used to as a direct reference to the map for the rest of the useEffect
+        const currentMap = map.current;
+
+        // Adds a listener event: .on
+        // Listens for the load event to finish loading the map
+        currentMap.on("load", () => {
+            
+            // Adds the new geographic data source from the geojson file: countries.geojson
+            currentMap.addSource("countries", {
+                type: "geojson",
+                data: "/countries.geojson",
+            });
+
+            // Fill layer to render the interior of the countries
+            currentMap.addLayer({
+                id: "countries-fill",
+                type: "fill",
+                source: "countries",
+                paint: {
+                    "fill-color": "#008000",
+                    "fill-opacity": 0.85,
+                },
+            });
+
+            // Outline Layer to render the exterior outline of the countries
+            currentMap.addLayer({
+                id: "countries-outline",
+                type: "line",
+                source: "countries",
+                paint: {
+                    //#222222: darkers color
+                    //#FFFFFF: white color
+                    "line-color": "#000000",
+                    "line-width": 1,
+                },
+            });
         });
 
         // Cleanuo function to remove the map when the component unmounts
