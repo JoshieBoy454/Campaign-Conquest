@@ -46,7 +46,7 @@ public static class PopulationRules {
         return 9;
     }
     // Calc soldier value after conqoring a country
-    public static int CalculateconquestReinforcements (int soldierValue) {
+    public static int CalculateConquestReinforcements (int soldierValue) {
 
         if (soldierValue < 1 || soldierValue > 9)
         {
