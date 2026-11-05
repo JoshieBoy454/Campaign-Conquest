@@ -1,3 +1,5 @@
+using Services;
+
 var builder = WebApplication.CreateBuilder(args);
 
 const string frontendCors = "Frontend";
@@ -11,7 +13,7 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod();
     });
 });
-
+builder.Services.AddScoped<TurnService>();
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
