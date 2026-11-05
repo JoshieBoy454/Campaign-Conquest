@@ -122,39 +122,50 @@ export default function Map() {
                 currentMap.getCanvas().style.cursor = "";
             });
 
-            // Listens for clicks on the countrys fill layer 
-            currentMap.on("click", "countries-fill", (event) => {
+            // Listens for clicks on the map
+            currentMap.on("click", (event) => {
 
-                // Selects the first feature in the array of geographic features detected at the clicked area
-                const country = event.features?.[0];
+                // Find any country features at the clicked position.
+                const features = currentMap.queryRenderedFeatures(event.point, {
+                    layers: ["countries-fill"],
+                });
 
-                // if no feature is found it stop executing
-                if(!country || country.id == null) {
+                // Retrieve the first country found, if one exists
+                const country = features[0];
+
+                // Remove the highlight from the previously selected country.
+                if (previousSelectionRef.current !== null) {
+                    currentMap.setFeatureState(
+                        {
+                            source: "countries",
+                            id: previousSelectionRef.current,
+                        },
+                        {
+                            selected: false,
+                        }
+                    );
+                }
+
+                // If no country was clicked, clear the selection.
+                if (!country || country.id == null) {
+
+                    // Clear the stored country ID
+                    previousSelectionRef.current = null;
+
+                    // Hide the country information panel
+                    setSelectedCountry(null);
+
                     return;
                 }
 
-                // Otherwise  it retrieves teh features id
+                // Get  the selected country's ID and name
                 const countryId = country.id;
 
-                // retrieves the countrys name fronm the geojson
                 const countryName = String(
                     country.properties?.name ?? countryId
                 );
 
-                //removes the highlight from the previously selected one if it exists
-                if (previousSelectionRef.current !== null) {
-                    currentMap.setFeatureState({
-
-                        source: "countries",
-                        id: previousSelectionRef.current,
-                    },
-                    {
-                        selected: false,
-                    }
-                    );
-                }
-
-                //Highlights the new slected country
+                // Highlight the new selected country
                 currentMap.setFeatureState(
                     {
                         source: "countries",
@@ -165,15 +176,15 @@ export default function Map() {
                     }
                 );
 
+                // Store the new selected country ID
                 previousSelectionRef.current = countryId;
-                
-                // Updates the info panel
+
+                // Display the selected country's information panel
                 setSelectedCountry({
                     id: String(countryId),
                     name: countryName,
                 });
             });
-
         });
 
         // Cleanuo function to remove the map when the component unmounts
