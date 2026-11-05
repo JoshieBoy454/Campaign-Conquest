@@ -26,14 +26,14 @@ public class TurnService {
         }
 
         // Checks how many countries and players there are and throws an excpetion if the count is invalid
-        if (game.Faction.Count 1= 10 || game.Territories.Count !=10) {
+        if (game.Factions.Count != 10 || game.Territories.Count != 10) {
             throw new InvalidOperationException (
                 "A game require 10 countires/territoreis and factions/players"
             );
         }
 
         // Checks how many humans are present in the game
-        if (game.Faction.Count(f => f.Type == FactionType.Human) != 1) {
+        if (game.Factions.Count(f => f.Type == FactionType.Human) != 1) {
             throw new InvalidOperationException (
               "A game can only have 1 human player"  
             );
@@ -42,17 +42,18 @@ public class TurnService {
         // Checks the turn positions and unsures they are all a unique value between 1 and 10
         var positions = game.Factions.Select(f => f.TurnPosition).OrderBy(position => position);
        
-        if (!positions. SequenceEqual(Ennumerable.Range(1, 10))) {
+        if (!positions.SequenceEqual(Enumerable.Range(1, 10))) {
             throw new InvalidOperationException (
                 "Faction turn positions must be a unique value from 1-10"
-            )
+            );
         }
+
          // checks if faction and country id are unique or thows an exception
-        if (game.Factions.Select(f => f.Id).Distinct().Count() != 10 || game.Territories.Select(t => t.CountryId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1 
-            || game.Territories.Any(t => string.IsNullOrWhiteSpace(t.CountryId))) {
-                throw new InvalidOperationException (
-                    " Factions and country ID's must all be unique and valid"
-                );
+        if (game.Factions.Select(f => f.Id).Distinct().Count() != 10 || game.Territories.Select(t => t.CountryId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 10 ||
+            game.Territories.Any(t => string.IsNullOrWhiteSpace(t.CountryId))) {
+            throw new InvalidOperationException(
+                "Faction and country IDs must all be unique and valid."
+            );
         }
 
         //checks if a player has a country or throws an exception
@@ -63,9 +64,15 @@ public class TurnService {
         }
 
         // Chekcs if a territory/country has less than 1 or more than 9 soldier when game starts or throws an exception
-        if (game.Territories.Any(t => t.soldiers < 1 || t.SoldierValue < 1 || t.SoldierValue > 9)) {
+        if (game.Territories.Any(t => t.Soldiers < 1 || t.SoldierValue < 1 || t.SoldierValue > 9)) {
             throw new InvalidOperationException (
                 " All Starting territories/Contries must have a valid army/soldier count"
+            );
+        }
+
+        if(game.Territories.Any(t => t.Soldiers != t.SoldierValue)) {
+            throw new InvalidOperationException(
+                " Starting army my equal its territories soldier value"
             );
         }
 
@@ -80,7 +87,7 @@ public class TurnService {
         game.WinnerFactionId = null;
 
         // Ensure the faction/player in turn 1 starts teh game
-        Faction firstFaction = game.Faction.Single(f => f.TurnPosition == 1);
+        Faction firstFaction = game.Factions.Single(f => f.TurnPosition == 1);
         BeginFactionTurn(game, firstFaction);
 
         // increments the Version for database
@@ -91,7 +98,7 @@ public class TurnService {
     // Method: AdvancePhase
     // This method advances turn phases and enforces conditions that enable turn phase advancement
     // -----------------------------------------------------------------------------
-    pubic void AdvancePhase (GameState game, Guid factionId) {
+    public void AdvancePhase (GameState game, Guid factionId) {
 
         Faction currentFaction = RequireActiveFaction(game, factionId);
 
@@ -121,7 +128,7 @@ public class TurnService {
                 game.CurrentPhase = TurnPhase.EndTurn;
                 break;
 
-            case TurnPhase.Endturn:
+            case TurnPhase.EndTurn:
 
                 if (CheckForVictory(game)) {
                     return;
@@ -154,6 +161,15 @@ public class TurnService {
             );
         }
 
+        // Checks if the amount of soilder being moved from the pool is valid
+        if (soldierCount <= 0 || soldierCount > game.ReinforcementPool) {
+            throw new ArgumentOutOfRangeException(
+                nameof(soldierCount), "Invalid reinforcement amount"
+            );
+        }
+
+        Territory territory = FindTerritory(game, countryId);
+
         // Checks if the territory/country youre trying to reinforce is owned by you otherwise throws an acception
         if (territory.OwnerFactionId != factionId) {
             throw new InvalidOperationException (
@@ -184,7 +200,7 @@ public class TurnService {
 
         // Validates that the soilder count is more than 1 otherwise throws an exception
         if (soldierCount <= 0) {
-            throw new ArgumentOutOfRangeExcpetion(nameof(soldierCount));
+            throw new ArgumentOutOfRangeException(nameof(soldierCount));
         }
 
         // Validates that the origin country and distination country are not the same
@@ -288,7 +304,7 @@ public class TurnService {
             
             int territoryCount = game.Territories.Count(t => t.OwnerFactionId == faction.Id);
 
-            game.ReinforcementPool = terriroryCount * 2;
+            game.ReinforcementPool = territoryCount * 2;
         }
     }
 
@@ -311,9 +327,9 @@ public class TurnService {
 
             string conqueredCountryId = game.ConqueredThisTurn[0];
 
-            Territory conqueredCountryId = FindTerritory(game, conqueredCountryId);
+            Territory conqueredTerritory = FindTerritory(game, conqueredCountryId);
 
-            if(conqueredTerritory.OwnerFactionId != factionId) {
+            if(conqueredTerritory.OwnerFactionId != faction.Id) {
                 throw new InvalidOperationException (
                     "The conquered territory must belong to the target faction"
                 );
@@ -338,15 +354,15 @@ public class TurnService {
             
             if (!game.Territories.Any(t => t.OwnerFactionId == faction.Id)) {
 
-                faction.IsDefeated = true
-            }
+                faction.IsDefeated = true;
+            };
         }
 
         // Creates a count of the number of acive factions/players there are in the game
-        var activefactions = game.Factions.Where(f => !f.IsDefeated).OrderBy(f => f.TurnPosition).ToList();
+        var activeFactions = game.Factions.Where(f => !f.IsDefeated).OrderBy(f => f.TurnPosition).ToList();
 
         // Checks if the number of active faction/players is 0 if true throws an exception
-        if (activefactions.Count == 0) {
+        if (activeFactions.Count == 0) {
             throw new InvalidOperationException(
                 "There are no remaining active factions"
             );
@@ -395,7 +411,7 @@ public class TurnService {
     // -----------------------------------------------------------------------------
     private static Territory FindTerritory(GameState game, string countryId) {
 
-        return game.Territories.FirstOrDefault(t => string.Equals(t.CountryId, countryId, StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentExpression(
+        return game.Territories.FirstOrDefault(t => string.Equals(t.CountryId, countryId, StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException(
                                                                                                                                         $" The country '{countryId}' is not an active territory",
                                                                                                                                         nameof(countryId));
     }
