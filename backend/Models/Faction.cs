@@ -10,13 +10,13 @@ public class Faction {
 
     public Guid Id {get; set;} = Guid.NewGuid();
 
-    public string Name {get; set;} = string.Empty();
+    public string Name {get; set;} = string.Empty;
 
     // 1 or 0, human or npc
     public FactionType Type {get; set;}
 
     // color of players territory
-    public string Color {get; set;} = "#"
+    public string Color {get; set;} = "#FFFFFF";
 
     //what position they are in the turn order 1-10 determined by d20
     public int TurnPosition {get; set;}

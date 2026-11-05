@@ -35,7 +35,7 @@ public class GameState {
 
     // used to determine what country was conqered in a turn
     // used to determine how many soldier to give in Upkeep 2
-    public List<string> ConqueredThisTurn {get; set;} = new()
+    public List<string> ConqueredThisTurn {get; set;} = new();
 
     //  the id of the winnnig faction, null until winner
     public Guid? WinnerFactionId {get; set;}

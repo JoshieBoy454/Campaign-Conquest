@@ -14,10 +14,10 @@ public class Territory {
     public string Name {get; set;} = string.Empty;
 
     // Counteis population count used to calc soldier value
-    public int Population {get; set;}
+    public long Population {get; set;}
 
     // Initial soldier value of country bassed on population count
-    public string SoldierValue {get; set;}
+    public int SoldierValue {get; set;}
 
     // ID of the faction that hold this territory
     public Guid OwnerFactionId {get; set;}
