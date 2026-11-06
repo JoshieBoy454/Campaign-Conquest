@@ -35,7 +35,7 @@ In MongoDB Atlas → Network Access → allow your **EC2 public IP** (and your h
 ```bash
 sudo apt update
 sudo apt install -y nginx
-# Install \.NET 9 ASP.NET runtime (Microsoft package feed)
+# Install .NET 10 ASP.NET runtime (Microsoft package feed)
 # https://learn.microsoft.com/dotnet/core/install/linux-ubuntu
 ```
 
@@ -45,6 +45,8 @@ sudo apt install -y nginx
 cd "c:\Users\Joshu\Desktop\Campaign Conquest\Campaign-Conquest"
 dotnet publish backend/CampaignConquest.Api.csproj -c Release -o .\publish-api
 ```
+
+Requires the **.NET 10** SDK locally and the **ASP.NET Core 10** runtime on EC2.
 
 Copy `publish-api\` to the server, e.g. `/var/www/campaign-api/`.
 
@@ -156,15 +158,64 @@ Restart API after changing it: `sudo systemctl restart campaign-api`.
 
 ---
 
+## CloudFront single-host layout (current plan)
+
+Distribution `https://dllta4qw5dvjv.cloudfront.net`:
+
+| Behavior | Origin | Notes |
+|---|---|---|
+| Default `*` | Private S3 (OAC) | React `dist/`; default root `index.html` |
+| `/api/*` | EC2 HTTP:80 | CachingDisabled; all methods |
+| `/hubs/*` | EC2 HTTP:80 | **Required for SignalR**; CachingDisabled; all methods; WebSockets on |
+
+SPA fallback: CloudFront custom error responses for **403/404 → 200 `/index.html`** (S3 private buckets often return 403 for missing keys).
+
+### Upload frontend
+
+```powershell
+cd frontend
+# VITE_API_BASE_URL is empty in .env.production → relative /api + /hubs
+npm ci
+npm run build
+aws s3 sync .\dist\ s3://YOUR_BUCKET_NAME/ --delete
+aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*"
+```
+
+### EC2 env CORS (optional when same CloudFront origin)
+
+In `/etc/campaign-api.env`:
+
+```text
+Cors__AllowedOrigins__0=http://localhost:5173
+Cors__AllowedOrigins__1=https://dllta4qw5dvjv.cloudfront.net
+```
+
+```bash
+sudo systemctl restart campaign-api
+```
+
+### SignalR check
+
+Browser console on the CloudFront site should connect to:
+
+```text
+wss://dllta4qw5dvjv.cloudfront.net/hubs/games
+```
+
+If `/hubs/*` is missing as a CF behavior, negotiate/WebSocket calls fall through to S3 and fail.
+
 ## Smoke checklist
 
-- [ ] `http://API/health` → ok
-- [ ] Open S3/CloudFront site → New Game works
-- [ ] Create game; refresh still works as host
-- [ ] Copy spectator link in another browser → read-only
-- [ ] Atlas shows documents in `Campaign-Conquest-DB`
-- [ ] Combat commentary appears once `LLM__ApiKey` is set (or stays factual if Gemini fails)
+- [ ] `https://dllta4qw5dvjv.cloudfront.net/api/games/countries` → JSON
+- [ ] CloudFront homepage loads React (not S3 XML / AccessDenied)
+- [ ] Map + `countries.geojson` load
+- [ ] New Game works; host cookie survives refresh
+- [ ] Spectator link in another browser is read-only
+- [ ] SignalR connects (`/hubs/games`)
+- [ ] Atlas shows game documents after create
+- [ ] Gemini commentary works or fails open (factual log still shows)
 
 ## Cost notes
 
 - One small EC2 + S3 + Atlas M0 + free Gemini tier fits a $100 credit easily.
+

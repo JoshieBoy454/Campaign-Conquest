@@ -5,7 +5,7 @@ Turn-based Risk-inspired strategy game: 1 human + 9 NPCs on a MapLibre world map
 ## Repo layout
 
 - `frontend/` — Vite + React + MapLibre
-- `backend/` — ASP.NET Core Web API + SignalR
+- `backend/` — ASP.NET Core Web API + SignalR (.NET 10)
 - `docs/DEPLOY.md` — AWS Cape Town deploy notes
 - `backup/pre-completion` / tag `v0-playable-baseline` — pre-completion rollback
 

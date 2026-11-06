@@ -1,17 +1,16 @@
 import * as signalR from "@microsoft/signalr";
 import type { GameState } from "../types/game";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
+import { apiUrl } from "./apiBase";
 
 // -------------------------------------------------------------------------
-// join a live game group and get shoved state updates
+// join a live game group — hub is /hubs/games (same CloudFront host in prod)
 // -------------------------------------------------------------------------
 export function connectGameHub(
     gameId: string,
     onGameUpdated: (game: GameState) => void
 ): signalR.HubConnection {
     const connection = new signalR.HubConnectionBuilder()
-        .withUrl(`${API_BASE_URL}/hubs/games`, {
+        .withUrl(apiUrl("/hubs/games"), {
             withCredentials: true,
         })
         .withAutomaticReconnect()

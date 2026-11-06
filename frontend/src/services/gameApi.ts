@@ -3,9 +3,7 @@ import type {
     GameInitializationResult,
     GameState
 } from "../types/game";
-
-// Retrieves the API address from the Vite environment configuration
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+import { apiUrl } from "./apiBase";
 
 function newActionId(): string {
     return crypto.randomUUID();
@@ -28,9 +26,7 @@ async function readGameOrThrow(response: Response, fallback: string): Promise<Ga
 export async function getCountries(): Promise<CountryDefinition[]> {
 
     // Send a GET request to the backend.
-    const response = await fetch(
-        `${API_BASE_URL}/api/games/countries`
-    );
+    const response = await fetch(apiUrl("/api/games/countries"));
 
     // Check if the HTTP request succeeded.
     if (!response.ok) {
@@ -50,9 +46,7 @@ export async function getCountries(): Promise<CountryDefinition[]> {
 export async function createGame(selectedCountryId: string): Promise<GameInitializationResult> {
 
     // Send the selected country to thebackend
-    const response = await fetch(
-        `${API_BASE_URL}/api/games`,
-        {
+    const response = await fetch(apiUrl("/api/games"), {
             method: "POST",
             credentials: "include",
             headers: {
@@ -61,8 +55,7 @@ export async function createGame(selectedCountryId: string): Promise<GameInitial
             body: JSON.stringify({
                 selectedCountryId: selectedCountryId,
             }),
-        }
-    );
+        });
 
     // Reject unsuccessful requests
     if (!response.ok) {
@@ -85,7 +78,7 @@ export async function getGame(
 
     // Request an existing game from the backend
     const response = await fetch(
-        `${API_BASE_URL}/api/games/${encodeURIComponent(gameId)}`,
+        apiUrl(`/api/games/${encodeURIComponent(gameId)}`),
         { credentials: "include" }
     );
 
@@ -105,7 +98,7 @@ async function postAction(
     body: Record<string, unknown>
 ): Promise<GameState> {
     const response = await fetch(
-        `${API_BASE_URL}/api/games/${encodeURIComponent(gameId)}/${path}`,
+        apiUrl(`/api/games/${encodeURIComponent(gameId)}/${path}`),
         {
             method: "POST",
             credentials: "include",

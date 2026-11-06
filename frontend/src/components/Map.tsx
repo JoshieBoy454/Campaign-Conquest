@@ -13,6 +13,7 @@ import {
     startCombat,
 } from "../services/gameApi";
 import { connectGameHub } from "../services/gameHub";
+import { apiUrl } from "../services/apiBase";
 import { pointOnFeature } from "@turf/point-on-feature";
 import type { FeatureCollection } from "geojson";
 import CountryInfoPanel from "./CountryInfoPanel";
@@ -100,7 +101,7 @@ export default function Map({ initialGameId = null }: MapProps) {
             });
 
         void fetch(
-            `${import.meta.env.VITE_API_BASE_URL}/api/games/${encodeURIComponent(initialGameId)}/host-status`,
+            apiUrl(`/api/games/${encodeURIComponent(initialGameId)}/host-status`),
             { credentials: "include" }
         )
             .then(async (response) => {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiUrl } from "../services/apiBase";
 
 type GameEventRow = {
     eventId: string;
@@ -24,7 +25,7 @@ export default function ActionLog({ gameId }: Props) {
         async function load() {
             try {
                 const response = await fetch(
-                    `${import.meta.env.VITE_API_BASE_URL}/api/games/${encodeURIComponent(gameId)}/events?afterSequence=0`,
+                    apiUrl(`/api/games/${encodeURIComponent(gameId)}/events?afterSequence=0`),
                     { credentials: "include" }
                 );
                 if (!response.ok) {

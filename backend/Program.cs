@@ -11,11 +11,16 @@ const string frontendCors = "Frontend";
 builder.Services.Configure<MongoDbOptions>(
     builder.Configuration.GetSection(MongoDbOptions.SectionName));
 
+string[] allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? ["http://localhost:5173"];
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(frontendCors, policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        // same CloudFront origin doesn't need CORS, but local Vite + any
+        // extra prod origins still do
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -70,7 +75,12 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-if (!app.Environment.IsDevelopment())
+// Behind CloudFront + nginx we stay on HTTP to Kestrel — don't bounce to HTTPS here.
+if (!app.Environment.IsDevelopment()
+    && string.Equals(
+        builder.Configuration["ForceHttpsRedirection"],
+        "true",
+        StringComparison.OrdinalIgnoreCase))
 {
     app.UseHttpsRedirection();
 }
