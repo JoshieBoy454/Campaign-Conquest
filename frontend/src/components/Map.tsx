@@ -408,13 +408,16 @@ export default function Map() {
                             // Keeps the position of the panel above the map
                             position: "absolute",
                             top: 20,
-                            right: 20,
+                            left: 20,
+                            width: 260,
+                            maxWidth: "calc(100vw - 40px)",
+                            maxHeight: "75vh",
+                            overflowY: "auto",
                             padding: 16,
                             backgroundColor: "#FFFFFF",
                             color: "#111111",
                             borderRadius: 8,
                             boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                            // Makes sure teh z positioning is above the map
                             zIndex: 10,
                         }}
                     >
@@ -472,9 +475,11 @@ export default function Map() {
                         top: 20,
                         right: 20,
                         padding: 16,
-                        width: 260,
-                        maxHeight: "80vh",
+                        width: 300,
+                        maxWidth: "calc(100vw - 40px)",
+                        maxHeight: "calc(100vh - 40px)",
                         overflowY: "auto",
+                        boxSizing: "border-box",
                         backgroundColor: "#FFFFFF",
                         color: "#111111",
                         borderRadius: 8,
@@ -552,7 +557,7 @@ export default function Map() {
                         })}
                 </div>
             )}
-            
+
             {error && (
                 <div
                     style={{
