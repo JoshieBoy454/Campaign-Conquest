@@ -92,6 +92,8 @@ export default function Map({
     const lastCombatRef = useRef<NonNullable<GameState["activeCombat"]> | null>(
         null
     );
+    const heldFinishKeyRef = useRef<string | null>(null);
+    const holdTimerRef = useRef<number | null>(null);
     const commitCountRef = useRef(1);
 
     useEffect(() => {
@@ -803,28 +805,49 @@ export default function Map({
         setCommitCount((prev) => Math.min(commitMax, Math.max(1, prev || commitMax)));
     }, [commitMax]);
 
-    // Hold the finishing combat panel so the last dice roll is visible.
+    // Show live combat always; after it ends, flash the last roll briefly then hide.
     useEffect(() => {
-        const live = game?.activeCombat ?? game?.lastResolvedCombat ?? null;
-        if (live) {
-            lastCombatRef.current = live;
-            setHeldCombat(live);
+        if (game?.activeCombat) {
+            if (holdTimerRef.current != null) {
+                window.clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = null;
+            }
+            lastCombatRef.current = game.activeCombat;
+            heldFinishKeyRef.current = null;
+            setHeldCombat(game.activeCombat);
             return;
         }
-        if (!lastCombatRef.current) {
+
+        // Already started (or finished) the post-fight hold — ignore sticky lastResolvedCombat.
+        if (heldFinishKeyRef.current != null) {
+            return;
+        }
+
+        const finishing =
+            game?.lastResolvedCombat ?? lastCombatRef.current ?? null;
+        if (!finishing) {
             setHeldCombat(null);
             return;
         }
-        setHeldCombat(lastCombatRef.current);
-        const handle = window.setTimeout(() => {
-            lastCombatRef.current = null;
+
+        heldFinishKeyRef.current = [
+            finishing.sourceCountryId,
+            finishing.destinationCountryId,
+            ...(finishing.lastAttackerDice ?? []),
+            ...(finishing.lastDefenderDice ?? []),
+            finishing.lastAttackerLosses,
+            finishing.lastDefenderLosses,
+        ].join("-");
+        lastCombatRef.current = finishing;
+        setHeldCombat(finishing);
+        holdTimerRef.current = window.setTimeout(() => {
             setHeldCombat(null);
-        }, 2200);
-        return () => window.clearTimeout(handle);
+            holdTimerRef.current = null;
+        }, 2000);
     }, [game?.activeCombat, game?.lastResolvedCombat, game?.version]);
 
-    const displayCombat =
-        game?.activeCombat ?? game?.lastResolvedCombat ?? heldCombat;
+    // Panel: live fight, or brief post-fight hold — never sticky forever.
+    const displayCombat = game?.activeCombat ?? heldCombat;
 
     return (
         <div style={{ width: "100%", height: "100dvh", position: "relative" }}>

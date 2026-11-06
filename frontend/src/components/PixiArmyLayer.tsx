@@ -194,6 +194,14 @@ export default function PixiArmyLayer({
                 factions.find((f) => f.id === ownerId)?.color ?? "#888888"
             );
 
+        const clearContainer = (container: Container | null) => {
+            if (!container) return;
+            // Destroy (not just remove) so AnimatedSprite tickers don't leak orphans.
+            while (container.children.length > 0) {
+                container.children[0].destroy({ children: true });
+            }
+        };
+
         const makeSoldier = (
             parent: Container,
             ll: [number, number],
@@ -209,23 +217,39 @@ export default function PixiArmyLayer({
             const scale = opts?.scale ?? SCALE_IDLE;
 
             if (textures && textures.length > 0) {
-                const sprite = new AnimatedSprite(textures);
-                sprite.anchor.set(0.5, 0.55);
-                sprite.animationSpeed =
-                    opts?.speed ?? (anim === "idle" ? 0.12 : 0.28);
-                sprite.loop = opts?.loop ?? anim !== "hit";
-                sprite.tint = color;
-                // Uniform scale keeps facing consistent (avoid width/height skew).
                 const base = textures[0].width || 96;
-                sprite.scale.set((96 * scale) / base);
-                sprite.x = p.x + offset.x;
-                sprite.y = p.y - 12 + offset.y;
+                const uniform = (96 * scale) / base;
+                let rotation = IDLE_FACING;
                 if (faceToward) {
                     const t = map.project(faceToward);
-                    sprite.rotation = facingRotation(sprite, t);
-                } else {
-                    sprite.rotation = IDLE_FACING;
+                    rotation = facingRotation(
+                        { x: p.x + offset.x, y: p.y - 12 + offset.y },
+                        t
+                    );
                 }
+
+                // Idle stays still — only combat/fx clips animate.
+                if (anim === "idle") {
+                    const sprite = new Sprite(textures[0]);
+                    sprite.anchor.set(0.5, 0.55);
+                    sprite.tint = color;
+                    sprite.scale.set(uniform);
+                    sprite.x = p.x + offset.x;
+                    sprite.y = p.y - 12 + offset.y;
+                    sprite.rotation = rotation;
+                    parent.addChild(sprite);
+                    return sprite;
+                }
+
+                const sprite = new AnimatedSprite(textures);
+                sprite.anchor.set(0.5, 0.55);
+                sprite.animationSpeed = opts?.speed ?? 0.28;
+                sprite.loop = opts?.loop ?? anim !== "hit";
+                sprite.tint = color;
+                sprite.scale.set(uniform);
+                sprite.x = p.x + offset.x;
+                sprite.y = p.y - 12 + offset.y;
+                sprite.rotation = rotation;
                 sprite.play();
                 parent.addChild(sprite);
                 return sprite;
@@ -263,7 +287,7 @@ export default function PixiArmyLayer({
         const redrawLod = () => {
             const layer = layerRef.current;
             if (!layer) return;
-            layer.removeChildren();
+            clearContainer(layer);
             tickRef.current += 1;
 
             for (const territory of territories) {
@@ -361,7 +385,7 @@ export default function PixiArmyLayer({
                 : null;
             if (!srcLl || !dstLl) return;
 
-            fx.removeChildren();
+            clearContainer(fx);
 
             const midA: [number, number] = [
                 srcLl[0] * 0.55 + dstLl[0] * 0.45,
@@ -372,6 +396,7 @@ export default function PixiArmyLayer({
                 srcLl[1] * 0.35 + dstLl[1] * 0.65,
             ];
 
+            // Only casualty hit clips in the FX layer — no looping run ghosts.
             if (item.kind === "casualty") {
                 if ((item.defenderLosses ?? 0) > 0) {
                     makeSoldier(
@@ -395,17 +420,6 @@ export default function PixiArmyLayer({
                         { loop: false, speed: 0.35, scale: SCALE_FX }
                     );
                 }
-            } else {
-                // Brief run pulse toward the fight on each round.
-                makeSoldier(
-                    fx,
-                    midA,
-                    undefined,
-                    { x: 0, y: -24 },
-                    "run",
-                    dstLl,
-                    { loop: true, speed: 0.4, scale: SCALE_FX }
-                );
             }
 
             const a = map.project(midA);
@@ -419,13 +433,19 @@ export default function PixiArmyLayer({
 
         const onPresentation = (item: PresentationItem | null) => {
             if (!item) {
-                fxRef.current?.removeChildren();
+                clearContainer(fxRef.current);
                 redrawLod();
                 return;
             }
             if (item.kind === "combat-round" || item.kind === "casualty") {
                 playSkirmish(item);
             }
+        };
+
+        const onCam = () => {
+            // FX is screen-anchored; wipe it on pan/zoom so sprites don't float free.
+            clearContainer(fxRef.current);
+            redrawLod();
         };
 
         // Wait briefly for textures if still loading, then draw.
@@ -441,15 +461,17 @@ export default function PixiArmyLayer({
         tryDraw();
 
         const unsub = presentationQueue.subscribe(onPresentation);
-        map.on("move", redrawLod);
-        map.on("zoom", redrawLod);
-        map.on("resize", redrawLod);
+        map.on("move", onCam);
+        map.on("zoom", onCam);
+        map.on("resize", onCam);
         return () => {
             cancelled = true;
             unsub();
-            map.off("move", redrawLod);
-            map.off("zoom", redrawLod);
-            map.off("resize", redrawLod);
+            map.off("move", onCam);
+            map.off("zoom", onCam);
+            map.off("resize", onCam);
+            clearContainer(layerRef.current);
+            clearContainer(fxRef.current);
         };
     }, [map, enabled, centers, territories, factions, combat]);
 
