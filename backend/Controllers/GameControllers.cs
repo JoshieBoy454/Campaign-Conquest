@@ -181,8 +181,13 @@ namespace Controllers;
         [HttpPost("{gameId:guid}/actions/advance-phase")]
         public Task<ActionResult<GameState>> AdvancePhase(
             Guid gameId,
-            [FromBody] VersionedActionRequest request,
+            [FromBody] VersionedActionRequest? request,
             CancellationToken cancellationToken) {
+
+            if (request == null) {
+                return Task.FromResult<ActionResult<GameState>>(
+                    BadRequest("Request body with expectedVersion is required"));
+            }
 
             return RunAction(
                 gameId,
@@ -331,6 +336,12 @@ namespace Controllers;
             }
             catch (InvalidOperationException ex) {
                 return BadRequest(ex.Message);
+            }
+            catch (Exception ex) {
+                // Surface unexpected failures (Mongo write, etc.) instead of opaque 500 HTML.
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new { message = ex.Message });
             }
         }
     }

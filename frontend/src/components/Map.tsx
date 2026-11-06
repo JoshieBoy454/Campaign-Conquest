@@ -180,13 +180,11 @@ export default function Map({
         };
     }, [game?.id]);
 
-    // Map bootstrap — once
+    // Map bootstrap — once (do not remount when catalogue arrives; that races terrain images)
     useEffect(() => {
         if (!mapContainerRef.current || map.current) return;
-        if (catalogueIsosRef.current.size === 0 && countries.length === 0) {
-            // wait for catalogue so selectable flags are correct
-        }
 
+        let cancelled = false;
         const currentMap = new MapLibreMap({
             container: mapContainerRef.current,
             style: {
@@ -210,21 +208,28 @@ export default function Map({
         map.current = currentMap;
 
         currentMap.on("load", () => {
+            if (cancelled) return;
             // Panable empty style + menu immediately; patterns/geo load after.
             setMapReady(true);
 
             void (async () => {
                 try {
-                    // After menu is visible — register tiles then countries (fill-pattern needs images).
+                    // Wait briefly for catalogue so selectable flags are correct.
+                    for (let i = 0; i < 40 && catalogueIsosRef.current.size === 0; i++) {
+                        await new Promise((r) => setTimeout(r, 50));
+                        if (cancelled) return;
+                    }
+
                     await registerTerrainImages(currentMap);
+                    if (cancelled || !currentMap.getStyle()) return;
 
                     const isos =
                         catalogueIsosRef.current.size > 0
                             ? catalogueIsosRef.current
-                            : new Set(
-                                  countries.map((c) => c.countryId.toUpperCase())
-                              );
+                            : new Set<string>();
                     const { collection } = await loadCountryGeoJson(isos);
+                    if (cancelled || !currentMap.getStyle()) return;
+
                     geoRef.current = collection;
                     addCountryLayers(currentMap, collection);
                     setCountriesGeometryReady(true);
@@ -256,6 +261,7 @@ export default function Map({
                     countryCentersRef.current = centers;
                     setCountryCentersReady(true);
                 } catch (err) {
+                    if (cancelled) return;
                     setError(
                         err instanceof Error
                             ? err.message
@@ -314,14 +320,14 @@ export default function Map({
         });
 
         return () => {
+            cancelled = true;
             if (driftTimerRef.current) {
                 window.clearTimeout(driftTimerRef.current);
             }
             currentMap.remove();
             map.current = null;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [countries.length > 0]);
+    }, []);
 
     // Camera drift on menu
     useEffect(() => {
@@ -905,9 +911,10 @@ export default function Map({
                 }
             />
 
+            {/* Troop counts use MapLibre markers only — no unit glyphs over the numbers. */}
             <PixiArmyLayer
                 map={map.current}
-                enabled={Boolean(game) && countryCentersReady}
+                enabled={false}
                 centers={countryCentersRef.current}
                 territories={game?.territories ?? []}
                 factions={game?.factions ?? []}

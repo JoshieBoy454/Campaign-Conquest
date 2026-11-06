@@ -12,9 +12,14 @@ function newActionId(): string {
 async function readGameOrThrow(response: Response, fallback: string): Promise<GameState> {
     if (!response.ok) {
         const body = await response.text();
-        throw new Error(
-            body || `${fallback} HTTP ${response.status}`
-        );
+        let detail = body;
+        try {
+            const parsed = JSON.parse(body) as { message?: string };
+            if (parsed?.message) detail = parsed.message;
+        } catch {
+            /* keep raw body */
+        }
+        throw new Error(detail || `${fallback} HTTP ${response.status}`);
     }
     return await response.json() as GameState;
 }

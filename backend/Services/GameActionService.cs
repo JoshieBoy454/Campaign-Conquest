@@ -296,8 +296,20 @@ public class GameActionService {
                 throw new GameVersionConflictException(expectedVersion, current?.Version ?? -1);
             }
 
-            await AppendEventAsync(gameId, actionId, eventType, game, cancellationToken);
-            await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, cancellationToken);
+            // Event log / SignalR must not roll a successful mutate into HTTP 500.
+            try {
+                await AppendEventAsync(gameId, actionId, eventType, game, cancellationToken);
+            }
+            catch {
+                // best-effort
+            }
+
+            try {
+                await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, cancellationToken);
+            }
+            catch {
+                // best-effort — client also polls
+            }
 
             if (idempotencyKey != null) {
                 _completedActions[idempotencyKey] = game;

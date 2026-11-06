@@ -58,10 +58,15 @@ export async function registerTerrainImages(map: MapLibreMap): Promise<void> {
     ][];
     await Promise.all(
         entries.map(async ([id, url]) => {
-            if (map.hasImage(id)) return;
-            const img = await map.loadImage(url);
-            if (!map.hasImage(id)) {
+            // Style can be gone if the map was removed mid-load.
+            if (!map.getStyle?.()) return;
+            try {
+                if (map.hasImage(id)) return;
+                const img = await map.loadImage(url);
+                if (!map.getStyle?.() || map.hasImage(id)) return;
                 map.addImage(id, img.data, { pixelRatio: 1 });
+            } catch (err) {
+                console.warn(`Terrain image failed: ${id}`, err);
             }
         })
     );
