@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 import {
+    AnimatedSprite,
     Application,
     Assets,
     Container,
     Graphics,
-    Rectangle,
     Sprite,
     Texture,
 } from "pixi.js";
@@ -15,20 +15,14 @@ import {
     type PresentationItem,
 } from "../services/presentationQueue";
 
-type FactionManifest = {
-    id: string;
-    atlas: string;
+type SoldierManifest = {
     frameSize: number;
-    muzzleOffset: [number, number];
-    animations: { idle: string[]; march: string[]; collapse: string[] };
-};
-
-type UnitsManifest = {
-    factions: FactionManifest[];
-    effects: {
-        muzzle: { atlas: string; frames: number; frameSize: number };
-        plasma: { atlas: string; frames: number; frameSize: number };
-        impact: { atlas: string; frames: number; frameSize: number };
+    facing: string;
+    animations: {
+        idle: string[];
+        run: string[];
+        shoot: string[];
+        hit: string[];
     };
 };
 
@@ -42,13 +36,6 @@ type Props = {
     presentationSpeed?: 1 | 2;
 };
 
-function frameTexture(atlas: Texture, index: number, size: number): Texture {
-    return new Texture({
-        source: atlas.source,
-        frame: new Rectangle(index * size, 0, size, size),
-    });
-}
-
 function tintFromHex(hex: string): number {
     const cleaned = hex.replace("#", "");
     const n = Number.parseInt(cleaned, 16);
@@ -57,24 +44,31 @@ function tintFromHex(hex: string): number {
 
 function badgeTexture(count: number, fill: number): Texture {
     const canvas = document.createElement("canvas");
-    canvas.width = 48;
-    canvas.height = 24;
+    canvas.width = 64;
+    canvas.height = 32;
     const ctx = canvas.getContext("2d")!;
-    ctx.clearRect(0, 0, 48, 24);
-    const r = 4;
+    ctx.clearRect(0, 0, 64, 32);
     ctx.fillStyle = `#${fill.toString(16).padStart(6, "0")}`;
     ctx.strokeStyle = "#2ee6ff";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.roundRect(1, 1, 46, 22, r);
+    ctx.roundRect(1, 1, 62, 30, 6);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px sans-serif";
+    ctx.font = "bold 18px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(String(count), 24, 13);
+    ctx.fillText(String(count), 32, 17);
     return Texture.from(canvas);
+}
+
+/** Art faces north (+up). Pixi rotation 0 faces east. */
+function facingRotation(
+    from: { x: number; y: number },
+    to: { x: number; y: number }
+): number {
+    return Math.atan2(to.y - from.y, to.x - from.x) + Math.PI / 2;
 }
 
 export default function PixiArmyLayer({
@@ -90,9 +84,10 @@ export default function PixiArmyLayer({
     const appRef = useRef<Application | null>(null);
     const layerRef = useRef<Container | null>(null);
     const fxRef = useRef<Container | null>(null);
-    const manifestRef = useRef<UnitsManifest | null>(null);
-    const texturesRef = useRef<Map<string, Texture>>(new Map());
+    const animTexturesRef = useRef<Map<string, Texture[]>>(new Map());
+    const readyRef = useRef(false);
     const lastCombatKey = useRef<string | null>(null);
+    const tickRef = useRef(0);
 
     useEffect(() => {
         if (!enabled || !hostRef.current) return;
@@ -122,29 +117,31 @@ export default function PixiArmyLayer({
 
             try {
                 const manifest = (await (
-                    await fetch("/assets/manifests/units.json")
-                ).json()) as UnitsManifest;
-                manifestRef.current = manifest;
-                for (const faction of manifest.factions) {
-                    const tex = await Assets.load(faction.atlas);
-                    texturesRef.current.set(`faction-${faction.id}`, tex);
+                    await fetch("/assets/manifests/soldier.json")
+                ).json()) as SoldierManifest;
+                for (const [name, urls] of Object.entries(manifest.animations)) {
+                    const textures: Texture[] = [];
+                    for (const url of urls) {
+                        textures.push(await Assets.load(url));
+                    }
+                    if (textures.length) {
+                        animTexturesRef.current.set(name, textures);
+                    }
                 }
-                for (const key of ["muzzle", "plasma", "impact"] as const) {
-                    const tex = await Assets.load(manifest.effects[key].atlas);
-                    texturesRef.current.set(key, tex);
-                }
+                readyRef.current = true;
             } catch {
-                /* graphics fallback */
+                readyRef.current = false;
             }
         })();
 
         return () => {
             destroyed = true;
+            readyRef.current = false;
             layerRef.current = null;
             fxRef.current = null;
             appRef.current?.destroy(true);
             appRef.current = null;
-            texturesRef.current.clear();
+            animTexturesRef.current.clear();
         };
     }, [enabled]);
 
@@ -181,58 +178,47 @@ export default function PixiArmyLayer({
     useEffect(() => {
         if (!map || !enabled) return;
 
-        const factionMeta = (ownerId: string | undefined) => {
-            const idx = Math.min(
-                Math.max(
-                    factions.findIndex((f) => f.id === ownerId),
-                    0
-                ),
-                9
+        const ownerColor = (ownerId: string | undefined) =>
+            tintFromHex(
+                factions.find((f) => f.id === ownerId)?.color ?? "#888888"
             );
-            const id = String(idx + 1).padStart(2, "0");
-            return {
-                idx,
-                id,
-                atlas: texturesRef.current.get(`faction-${id}`),
-                color: tintFromHex(
-                    factions.find((f) => f.id === ownerId)?.color ?? "#888888"
-                ),
-                size: manifestRef.current?.factions[idx]?.frameSize ?? 64,
-                anim: manifestRef.current?.factions[idx]?.animations,
-            };
-        };
 
-        const addUnit = (
+        const makeSoldier = (
             parent: Container,
             ll: [number, number],
             ownerId: string | undefined,
             offset: { x: number; y: number },
+            anim: "idle" | "run" | "shoot" | "hit",
             faceToward?: [number, number],
-            frame = 0
+            opts?: { loop?: boolean; speed?: number; scale?: number }
         ) => {
             const p = map.project(ll);
-            const meta = factionMeta(ownerId);
-            if (meta.atlas) {
-                const sprite = new Sprite(frameTexture(meta.atlas, frame, meta.size));
-                sprite.anchor.set(0.5);
-                sprite.width = 26;
-                sprite.height = 26;
-                sprite.tint = meta.color;
+            const textures = animTexturesRef.current.get(anim);
+            const color = ownerColor(ownerId);
+            const scale = opts?.scale ?? 0.42;
+
+            if (textures && textures.length > 0) {
+                const sprite = new AnimatedSprite(textures);
+                sprite.anchor.set(0.5, 0.62);
+                sprite.animationSpeed = opts?.speed ?? (anim === "idle" ? 0.12 : 0.28);
+                sprite.loop = opts?.loop ?? anim !== "hit";
+                sprite.tint = color;
+                sprite.width = 96 * scale;
+                sprite.height = 96 * scale;
                 sprite.x = p.x + offset.x;
-                sprite.y = p.y - 14 + offset.y;
+                sprite.y = p.y - 10 + offset.y;
                 if (faceToward) {
                     const t = map.project(faceToward);
-                    sprite.rotation = Math.atan2(
-                        t.y - sprite.y,
-                        t.x - sprite.x
-                    );
+                    sprite.rotation = facingRotation(sprite, t);
                 }
+                sprite.play();
                 parent.addChild(sprite);
                 return sprite;
             }
+
             const g = new Graphics();
             g.circle(0, 0, 7);
-            g.fill({ color: meta.color, alpha: 0.9 });
+            g.fill({ color, alpha: 0.9 });
             g.stroke({ width: 1.5, color: 0x2ee6ff, alpha: 0.9 });
             g.x = p.x + offset.x;
             g.y = p.y - 18 + offset.y;
@@ -245,7 +231,7 @@ export default function PixiArmyLayer({
             ll: [number, number],
             count: number,
             colorHex: string,
-            yLift = 30
+            yLift = 36
         ) => {
             const badge = new Sprite(
                 badgeTexture(count, tintFromHex(colorHex))
@@ -254,8 +240,8 @@ export default function PixiArmyLayer({
             const p = map.project(ll);
             badge.x = p.x;
             badge.y = p.y - yLift;
-            badge.width = 36;
-            badge.height = 18;
+            badge.width = 44;
+            badge.height = 22;
             parent.addChild(badge);
         };
 
@@ -263,35 +249,37 @@ export default function PixiArmyLayer({
             const layer = layerRef.current;
             if (!layer) return;
             layer.removeChildren();
+            tickRef.current += 1;
 
             for (const territory of territories) {
                 const ll = centers[territory.countryId];
                 if (!ll) continue;
 
-                // During combat the committed attackers leave the source —
-                // still show garrison left at home.
                 const isCombatDest =
                     combat &&
                     territory.countryId === combat.destinationCountryId;
+                const isCombatSrc =
+                    combat &&
+                    territory.countryId === combat.sourceCountryId;
                 const displayCount = isCombatDest
                     ? combat.defenderSoldiers
                     : territory.soldiers;
 
                 const face =
-                    combat?.sourceCountryId === territory.countryId &&
-                    centers[combat.destinationCountryId]
+                    isCombatSrc && centers[combat.destinationCountryId]
                         ? centers[combat.destinationCountryId]
                         : undefined;
 
-                // Idle LOD: badge-forward; keep a small unit glyph when not in a fight.
-                if (!combat) {
-                    addUnit(
+                // Idle soldiers on map; source garrison stays while attackers are mid-field.
+                if (!isCombatDest) {
+                    makeSoldier(
                         layer,
                         ll,
                         territory.ownerFactionId,
                         { x: 0, y: 0 },
+                        combat && isCombatSrc ? "idle" : "idle",
                         face,
-                        0
+                        { loop: true, speed: 0.1, scale: 0.38 }
                     );
                 }
 
@@ -303,11 +291,10 @@ export default function PixiArmyLayer({
                     ll,
                     displayCount,
                     owner?.color ?? "#333333",
-                    combat ? 18 : 30
+                    combat ? 22 : 38
                 );
             }
 
-            // Persistent attacking force between the two countries while combat is live.
             if (combat) {
                 const srcLl = centers[combat.sourceCountryId];
                 const dstLl = centers[combat.destinationCountryId];
@@ -319,35 +306,38 @@ export default function PixiArmyLayer({
                     const atkColor =
                         factions.find((f) => f.id === combat.attackerFactionId)
                             ?.color ?? "#2ee6ff";
-                    addUnit(
+                    makeSoldier(
                         layer,
                         mid,
                         combat.attackerFactionId,
-                        { x: -12, y: -4 },
+                        { x: -14, y: -4 },
+                        "shoot",
                         dstLl,
-                        1
+                        { loop: true, speed: 0.32, scale: 0.46 }
                     );
-                    addUnit(
+                    makeSoldier(
                         layer,
                         mid,
                         combat.attackerFactionId,
-                        { x: 12, y: 6 },
+                        { x: 14, y: 8 },
+                        "shoot",
                         dstLl,
-                        2
+                        { loop: true, speed: 0.28, scale: 0.42 }
                     );
-                    placeBadge(layer, mid, combat.attackerSoldiers, atkColor, 36);
+                    placeBadge(layer, mid, combat.attackerSoldiers, atkColor, 42);
 
                     const defMid: [number, number] = [
                         srcLl[0] * 0.35 + dstLl[0] * 0.65,
                         srcLl[1] * 0.35 + dstLl[1] * 0.65,
                     ];
-                    addUnit(
+                    makeSoldier(
                         layer,
                         defMid,
                         combat.defenderFactionId,
                         { x: 0, y: 0 },
+                        "shoot",
                         srcLl,
-                        1
+                        { loop: true, speed: 0.26, scale: 0.44 }
                     );
                 }
             }
@@ -355,8 +345,7 @@ export default function PixiArmyLayer({
 
         const playSkirmish = (item: PresentationItem) => {
             const fx = fxRef.current;
-            const layer = layerRef.current;
-            if (!fx || !layer || !map) return;
+            if (!fx || !map) return;
             const srcLl = item.sourceCountryId
                 ? centers[item.sourceCountryId]
                 : null;
@@ -365,7 +354,6 @@ export default function PixiArmyLayer({
                 : null;
             if (!srcLl || !dstLl) return;
 
-            // FX only — keep LOD armies on the main layer so attackers stay visible.
             fx.removeChildren();
 
             const midA: [number, number] = [
@@ -377,46 +365,48 @@ export default function PixiArmyLayer({
                 srcLl[1] * 0.35 + dstLl[1] * 0.65,
             ];
 
+            if (item.kind === "casualty") {
+                if ((item.defenderLosses ?? 0) > 0) {
+                    makeSoldier(
+                        fx,
+                        midB,
+                        undefined,
+                        { x: 18, y: -8 },
+                        "hit",
+                        srcLl,
+                        { loop: false, speed: 0.35, scale: 0.4 }
+                    );
+                }
+                if ((item.attackerLosses ?? 0) > 0) {
+                    makeSoldier(
+                        fx,
+                        midA,
+                        undefined,
+                        { x: -18, y: 8 },
+                        "hit",
+                        dstLl,
+                        { loop: false, speed: 0.35, scale: 0.4 }
+                    );
+                }
+            } else {
+                // Brief run pulse toward the fight on each round.
+                makeSoldier(
+                    fx,
+                    midA,
+                    undefined,
+                    { x: 0, y: -16 },
+                    "run",
+                    dstLl,
+                    { loop: true, speed: 0.4, scale: 0.36 }
+                );
+            }
+
             const a = map.project(midA);
             const b = map.project(midB);
-            const muzzleAtlas = texturesRef.current.get("muzzle");
-            const plasmaAtlas = texturesRef.current.get("plasma");
-            const impactAtlas = texturesRef.current.get("impact");
-
-            if (muzzleAtlas) {
-                const muzzle = new Sprite(frameTexture(muzzleAtlas, 1, 64));
-                muzzle.anchor.set(0.5);
-                muzzle.width = 22;
-                muzzle.height = 22;
-                muzzle.x = a.x + 8;
-                muzzle.y = a.y - 10;
-                fx.addChild(muzzle);
-            }
-            if (plasmaAtlas) {
-                const bolt = new Sprite(frameTexture(plasmaAtlas, 2, 64));
-                bolt.anchor.set(0.5);
-                bolt.width = 22;
-                bolt.height = 12;
-                bolt.x = (a.x + b.x) / 2;
-                bolt.y = (a.y + b.y) / 2;
-                bolt.rotation = Math.atan2(b.y - a.y, b.x - a.x);
-                fx.addChild(bolt);
-            }
-
-            if (item.kind === "casualty" && impactAtlas) {
-                const impact = new Sprite(frameTexture(impactAtlas, 2, 64));
-                impact.anchor.set(0.5);
-                impact.width = 28;
-                impact.height = 28;
-                impact.x = (item.defenderLosses ?? 0) > 0 ? b.x : a.x;
-                impact.y = (item.defenderLosses ?? 0) > 0 ? b.y : a.y;
-                fx.addChild(impact);
-            }
-
             const beam = new Graphics();
             beam.moveTo(a.x, a.y);
             beam.lineTo(b.x, b.y);
-            beam.stroke({ width: 2, color: 0x2ee6ff, alpha: 0.55 });
+            beam.stroke({ width: 2, color: 0x2ee6ff, alpha: 0.4 });
             fx.addChild(beam);
         };
 
@@ -431,12 +421,24 @@ export default function PixiArmyLayer({
             }
         };
 
-        redrawLod();
+        // Wait briefly for textures if still loading, then draw.
+        let cancelled = false;
+        const tryDraw = () => {
+            if (cancelled) return;
+            if (!readyRef.current && animTexturesRef.current.size === 0) {
+                window.setTimeout(tryDraw, 80);
+                return;
+            }
+            redrawLod();
+        };
+        tryDraw();
+
         const unsub = presentationQueue.subscribe(onPresentation);
         map.on("move", redrawLod);
         map.on("zoom", redrawLod);
         map.on("resize", redrawLod);
         return () => {
+            cancelled = true;
             unsub();
             map.off("move", redrawLod);
             map.off("zoom", redrawLod);

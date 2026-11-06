@@ -328,5 +328,5 @@
       "frameSize": 64
     }
   },
-  "notes": "Auto-cropped from Sci-Fi_asset_animation.png; refine crop manifest if jitter appears."
+  "notes": "Legacy faction strip atlases. Live map units use manifests/soldier.json (Soldier folder)."
 }

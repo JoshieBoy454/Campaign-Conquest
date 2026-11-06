@@ -1,0 +1,64 @@
+{
+  "frameSize": 96,
+  "facing": "north",
+  "animations": {
+    "idle": [
+      "/assets/units/soldier/idle/00.png",
+      "/assets/units/soldier/idle/01.png",
+      "/assets/units/soldier/idle/02.png",
+      "/assets/units/soldier/idle/03.png",
+      "/assets/units/soldier/idle/04.png",
+      "/assets/units/soldier/idle/05.png",
+      "/assets/units/soldier/idle/06.png"
+    ],
+    "run": [
+      "/assets/units/soldier/run/00.png",
+      "/assets/units/soldier/run/01.png",
+      "/assets/units/soldier/run/02.png",
+      "/assets/units/soldier/run/03.png",
+      "/assets/units/soldier/run/04.png",
+      "/assets/units/soldier/run/05.png",
+      "/assets/units/soldier/run/06.png",
+      "/assets/units/soldier/run/07.png",
+      "/assets/units/soldier/run/08.png",
+      "/assets/units/soldier/run/09.png",
+      "/assets/units/soldier/run/10.png",
+      "/assets/units/soldier/run/11.png",
+      "/assets/units/soldier/run/12.png"
+    ],
+    "shoot": [
+      "/assets/units/soldier/shoot/00.png",
+      "/assets/units/soldier/shoot/01.png",
+      "/assets/units/soldier/shoot/02.png",
+      "/assets/units/soldier/shoot/03.png",
+      "/assets/units/soldier/shoot/04.png",
+      "/assets/units/soldier/shoot/05.png",
+      "/assets/units/soldier/shoot/06.png",
+      "/assets/units/soldier/shoot/07.png",
+      "/assets/units/soldier/shoot/08.png",
+      "/assets/units/soldier/shoot/09.png",
+      "/assets/units/soldier/shoot/10.png",
+      "/assets/units/soldier/shoot/11.png",
+      "/assets/units/soldier/shoot/12.png",
+      "/assets/units/soldier/shoot/13.png",
+      "/assets/units/soldier/shoot/14.png",
+      "/assets/units/soldier/shoot/15.png"
+    ],
+    "hit": [
+      "/assets/units/soldier/hit/00.png",
+      "/assets/units/soldier/hit/01.png",
+      "/assets/units/soldier/hit/02.png",
+      "/assets/units/soldier/hit/03.png",
+      "/assets/units/soldier/hit/04.png",
+      "/assets/units/soldier/hit/05.png",
+      "/assets/units/soldier/hit/06.png",
+      "/assets/units/soldier/hit/07.png",
+      "/assets/units/soldier/hit/08.png",
+      "/assets/units/soldier/hit/09.png",
+      "/assets/units/soldier/hit/10.png",
+      "/assets/units/soldier/hit/11.png",
+      "/assets/units/soldier/hit/12.png"
+    ]
+  },
+  "notes": "Subsampled from frontend/src/assets/Soldier; black keyed to alpha."
+}
