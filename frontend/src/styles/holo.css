@@ -270,12 +270,12 @@
   }
 }
 
-.holo-die-rolling {
+.holo-dice-row-rolling .holo-die {
   animation: holo-die-spin 0.12s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .holo-die-rolling {
+  .holo-dice-row-rolling .holo-die {
     animation: none;
   }
 }

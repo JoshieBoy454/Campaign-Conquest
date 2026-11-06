@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CombatState } from "../types/game";
 
 type Props = {
@@ -19,16 +19,14 @@ function diceKey(combat: CombatState): string {
 
 function DieFace({
     value,
-    rolling,
     tone,
 }: {
     value: number;
-    rolling: boolean;
     tone: "atk" | "def";
 }) {
     return (
         <span
-            className={rolling ? "holo-die holo-die-rolling" : "holo-die"}
+            className="holo-die"
             style={{
                 background:
                     tone === "atk"
@@ -38,7 +36,7 @@ function DieFace({
                     tone === "atk" ? "var(--holo-accent)" : "var(--holo-danger)",
             }}
         >
-            {rolling ? (Math.floor(Math.random() * 6) + 1) : value}
+            {value}
         </span>
     );
 }
@@ -46,22 +44,19 @@ function DieFace({
 function DiceRow({
     label,
     values,
-    rolling,
     tone,
 }: {
     label: string;
     values: number[];
-    rolling: boolean;
     tone: "atk" | "def";
 }) {
-    if (values.length === 0 && !rolling) {
+    if (values.length === 0) {
         return (
             <div className="holo-muted" style={{ fontSize: 12 }}>
                 {label}: awaiting roll
             </div>
         );
     }
-    const faces = values.length > 0 ? values : [1];
     return (
         <div
             style={{
@@ -75,8 +70,8 @@ function DiceRow({
             <span className="holo-muted" style={{ fontSize: 12, minWidth: 64 }}>
                 {label}
             </span>
-            {faces.map((d, i) => (
-                <DieFace key={`${tone}-${i}-${d}`} value={d} rolling={rolling} tone={tone} />
+            {values.map((d, i) => (
+                <DieFace key={`${tone}-${i}`} value={d} tone={tone} />
             ))}
         </div>
     );
@@ -87,31 +82,83 @@ export default function DiceOverlay({
     sourceName,
     destinationName,
 }: Props) {
+    const [displayAtk, setDisplayAtk] = useState<number[]>([]);
+    const [displayDef, setDisplayDef] = useState<number[]>([]);
     const [rolling, setRolling] = useState(false);
-    const [tick, setTick] = useState(0);
+    const lastKeyRef = useRef("");
 
     const rollKey = combat ? diceKey(combat) : "";
+    const hasDice = Boolean(
+        combat &&
+            ((combat.lastAttackerDice?.length ?? 0) > 0 ||
+                (combat.lastDefenderDice?.length ?? 0) > 0)
+    );
 
     useEffect(() => {
-        if (!combat || !rollKey) return;
-        if (!(combat.lastAttackerDice?.length || combat.lastDefenderDice?.length)) {
+        if (!combat) {
+            setDisplayAtk([]);
+            setDisplayDef([]);
+            setRolling(false);
+            lastKeyRef.current = "";
+            return;
+        }
+
+        const finalAtk = combat.lastAttackerDice ?? [];
+        const finalDef = combat.lastDefenderDice ?? [];
+
+        // No roll yet — show empty / awaiting
+        if (finalAtk.length === 0 && finalDef.length === 0) {
+            setDisplayAtk([]);
+            setDisplayDef([]);
+            setRolling(false);
+            lastKeyRef.current = rollKey;
+            return;
+        }
+
+        // Same result as last time (e.g. poll refresh) — keep settled faces
+        if (rollKey === lastKeyRef.current) {
+            setDisplayAtk(finalAtk);
+            setDisplayDef(finalDef);
             setRolling(false);
             return;
         }
+
+        lastKeyRef.current = rollKey;
         setRolling(true);
-        const frames = window.setInterval(() => setTick((t) => t + 1), 70);
+
+        const reduced =
+            typeof window !== "undefined" &&
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduced) {
+            setDisplayAtk(finalAtk);
+            setDisplayDef(finalDef);
+            setRolling(false);
+            return;
+        }
+
+        const frames = window.setInterval(() => {
+            setDisplayAtk(
+                finalAtk.map(() => Math.floor(Math.random() * 6) + 1)
+            );
+            setDisplayDef(
+                finalDef.map(() => Math.floor(Math.random() * 6) + 1)
+            );
+        }, 70);
+
         const stop = window.setTimeout(() => {
             window.clearInterval(frames);
+            setDisplayAtk(finalAtk);
+            setDisplayDef(finalDef);
             setRolling(false);
-        }, 520);
+        }, 480);
+
         return () => {
             window.clearInterval(frames);
             window.clearTimeout(stop);
         };
-    }, [rollKey, combat]);
+    }, [combat, rollKey]);
 
     if (!combat) return null;
-    void tick;
 
     const src = sourceName ?? combat.sourceCountryId;
     const dst = destinationName ?? combat.destinationCountryId;
@@ -167,20 +214,14 @@ export default function DiceOverlay({
                     </div>
                 </div>
 
-                <DiceRow
-                    label="Attacker"
-                    values={combat.lastAttackerDice ?? []}
-                    rolling={rolling}
-                    tone="atk"
-                />
-                <DiceRow
-                    label="Defender"
-                    values={combat.lastDefenderDice ?? []}
-                    rolling={rolling}
-                    tone="def"
-                />
+                <div className={rolling ? "holo-dice-row-rolling" : undefined}>
+                    <DiceRow label="Attacker" values={displayAtk} tone="atk" />
+                </div>
+                <div className={rolling ? "holo-dice-row-rolling" : undefined}>
+                    <DiceRow label="Defender" values={displayDef} tone="def" />
+                </div>
 
-                {(combat.lastAttackerDice?.length ?? 0) > 0 && (
+                {hasDice && !rolling && (
                     <div className="holo-muted" style={{ fontSize: 12 }}>
                         Losses −{combat.lastAttackerLosses} / −
                         {combat.lastDefenderLosses}

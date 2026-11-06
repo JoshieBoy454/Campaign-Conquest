@@ -55,11 +55,6 @@ function tintFromHex(hex: string): number {
     return Number.isFinite(n) ? n : 0x888888;
 }
 
-function frameIndex(token: string): number {
-    const m = /^f(\d+)$/i.exec(token);
-    return m ? Number(m[1]) : 0;
-}
-
 function badgeTexture(count: number, fill: number): Texture {
     const canvas = document.createElement("canvas");
     canvas.width = 48;
@@ -98,7 +93,6 @@ export default function PixiArmyLayer({
     const manifestRef = useRef<UnitsManifest | null>(null);
     const texturesRef = useRef<Map<string, Texture>>(new Map());
     const lastCombatKey = useRef<string | null>(null);
-    const skirmishActive = useRef(false);
 
     useEffect(() => {
         if (!enabled || !hostRef.current) return;
@@ -246,38 +240,116 @@ export default function PixiArmyLayer({
             return g;
         };
 
+        const placeBadge = (
+            parent: Container,
+            ll: [number, number],
+            count: number,
+            colorHex: string,
+            yLift = 30
+        ) => {
+            const badge = new Sprite(
+                badgeTexture(count, tintFromHex(colorHex))
+            );
+            badge.anchor.set(0.5, 1);
+            const p = map.project(ll);
+            badge.x = p.x;
+            badge.y = p.y - yLift;
+            badge.width = 36;
+            badge.height = 18;
+            parent.addChild(badge);
+        };
+
         const redrawLod = () => {
             const layer = layerRef.current;
             if (!layer) return;
             layer.removeChildren();
-            if (skirmishActive.current) return;
 
             for (const territory of territories) {
                 const ll = centers[territory.countryId];
                 if (!ll) continue;
+
+                // During combat the committed attackers leave the source —
+                // still show garrison left at home.
+                const isCombatDest =
+                    combat &&
+                    territory.countryId === combat.destinationCountryId;
+                const displayCount = isCombatDest
+                    ? combat.defenderSoldiers
+                    : territory.soldiers;
+
                 const face =
                     combat?.sourceCountryId === territory.countryId &&
                     centers[combat.destinationCountryId]
                         ? centers[combat.destinationCountryId]
                         : undefined;
-                addUnit(layer, ll, territory.ownerFactionId, { x: 0, y: 0 }, face, 0);
+
+                // Idle LOD: badge-forward; keep a small unit glyph when not in a fight.
+                if (!combat) {
+                    addUnit(
+                        layer,
+                        ll,
+                        territory.ownerFactionId,
+                        { x: 0, y: 0 },
+                        face,
+                        0
+                    );
+                }
 
                 const owner = factions.find(
                     (f) => f.id === territory.ownerFactionId
                 );
-                const badge = new Sprite(
-                    badgeTexture(
-                        territory.soldiers,
-                        tintFromHex(owner?.color ?? "#333333")
-                    )
+                placeBadge(
+                    layer,
+                    ll,
+                    displayCount,
+                    owner?.color ?? "#333333",
+                    combat ? 18 : 30
                 );
-                badge.anchor.set(0.5, 1);
-                const p = map.project(ll);
-                badge.x = p.x;
-                badge.y = p.y - 30;
-                badge.width = 28;
-                badge.height = 14;
-                layer.addChild(badge);
+            }
+
+            // Persistent attacking force between the two countries while combat is live.
+            if (combat) {
+                const srcLl = centers[combat.sourceCountryId];
+                const dstLl = centers[combat.destinationCountryId];
+                if (srcLl && dstLl) {
+                    const mid: [number, number] = [
+                        srcLl[0] * 0.55 + dstLl[0] * 0.45,
+                        srcLl[1] * 0.55 + dstLl[1] * 0.45,
+                    ];
+                    const atkColor =
+                        factions.find((f) => f.id === combat.attackerFactionId)
+                            ?.color ?? "#2ee6ff";
+                    addUnit(
+                        layer,
+                        mid,
+                        combat.attackerFactionId,
+                        { x: -12, y: -4 },
+                        dstLl,
+                        1
+                    );
+                    addUnit(
+                        layer,
+                        mid,
+                        combat.attackerFactionId,
+                        { x: 12, y: 6 },
+                        dstLl,
+                        2
+                    );
+                    placeBadge(layer, mid, combat.attackerSoldiers, atkColor, 36);
+
+                    const defMid: [number, number] = [
+                        srcLl[0] * 0.35 + dstLl[0] * 0.65,
+                        srcLl[1] * 0.35 + dstLl[1] * 0.65,
+                    ];
+                    addUnit(
+                        layer,
+                        defMid,
+                        combat.defenderFactionId,
+                        { x: 0, y: 0 },
+                        srcLl,
+                        1
+                    );
+                }
             }
         };
 
@@ -293,30 +365,17 @@ export default function PixiArmyLayer({
                 : null;
             if (!srcLl || !dstLl) return;
 
-            skirmishActive.current = true;
-            layer.removeChildren();
+            // FX only — keep LOD armies on the main layer so attackers stay visible.
             fx.removeChildren();
 
-            const srcT = territories.find(
-                (t) => t.countryId === item.sourceCountryId
-            );
-            const dstT = territories.find(
-                (t) => t.countryId === item.destinationCountryId
-            );
             const midA: [number, number] = [
-                srcLl[0] * 0.65 + dstLl[0] * 0.35,
-                srcLl[1] * 0.65 + dstLl[1] * 0.35,
+                srcLl[0] * 0.55 + dstLl[0] * 0.45,
+                srcLl[1] * 0.55 + dstLl[1] * 0.45,
             ];
             const midB: [number, number] = [
                 srcLl[0] * 0.35 + dstLl[0] * 0.65,
                 srcLl[1] * 0.35 + dstLl[1] * 0.65,
             ];
-
-            // 4-sprite set piece: attacker pair vs defender pair
-            addUnit(fx, midA, srcT?.ownerFactionId, { x: -10, y: -6 }, dstLl, 1);
-            addUnit(fx, midA, srcT?.ownerFactionId, { x: 10, y: 6 }, dstLl, 2);
-            addUnit(fx, midB, dstT?.ownerFactionId, { x: -10, y: 6 }, srcLl, 1);
-            addUnit(fx, midB, dstT?.ownerFactionId, { x: 10, y: -6 }, srcLl, 2);
 
             const a = map.project(midA);
             const b = map.project(midB);
@@ -344,38 +403,14 @@ export default function PixiArmyLayer({
                 fx.addChild(bolt);
             }
 
-            if (item.kind === "casualty") {
-                if (impactAtlas) {
-                    const impact = new Sprite(frameTexture(impactAtlas, 2, 64));
-                    impact.anchor.set(0.5);
-                    impact.width = 28;
-                    impact.height = 28;
-                    impact.x =
-                        (item.defenderLosses ?? 0) > 0 ? b.x : a.x;
-                    impact.y =
-                        (item.defenderLosses ?? 0) > 0 ? b.y : a.y;
-                    fx.addChild(impact);
-                }
-                const collapseOwner =
-                    (item.defenderLosses ?? 0) > 0
-                        ? dstT?.ownerFactionId
-                        : srcT?.ownerFactionId;
-                const collapseAt =
-                    (item.defenderLosses ?? 0) > 0 ? midB : midA;
-                const meta = factionMeta(collapseOwner);
-                if (meta.atlas && meta.anim?.collapse?.length) {
-                    const frame = frameIndex(
-                        meta.anim.collapse[meta.anim.collapse.length - 1]
-                    );
-                    addUnit(
-                        fx,
-                        collapseAt,
-                        collapseOwner,
-                        { x: 0, y: 14 },
-                        undefined,
-                        frame
-                    );
-                }
+            if (item.kind === "casualty" && impactAtlas) {
+                const impact = new Sprite(frameTexture(impactAtlas, 2, 64));
+                impact.anchor.set(0.5);
+                impact.width = 28;
+                impact.height = 28;
+                impact.x = (item.defenderLosses ?? 0) > 0 ? b.x : a.x;
+                impact.y = (item.defenderLosses ?? 0) > 0 ? b.y : a.y;
+                fx.addChild(impact);
             }
 
             const beam = new Graphics();
@@ -387,7 +422,6 @@ export default function PixiArmyLayer({
 
         const onPresentation = (item: PresentationItem | null) => {
             if (!item) {
-                skirmishActive.current = false;
                 fxRef.current?.removeChildren();
                 redrawLod();
                 return;
