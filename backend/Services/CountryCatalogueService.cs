@@ -10,6 +10,20 @@
     // -----------------------------------------------------------------------------
     public class CountryCatalogueService {
 
+        // Countries available in the population dataset but missing from GeoJSON
+        // These countries cannot be selected as active game territories
+        private static readonly HashSet<string> ExcludedCountryIds = new(
+            StringComparer.OrdinalIgnoreCase
+        )
+        {
+            "GUF",
+            "GLP",
+            "MTQ",
+            "MYT",
+            "REU",
+            "TKL"
+        };
+
         private readonly List<CountryDefinition> _countries;
 
 
@@ -125,7 +139,16 @@
                     "The catalogue must contain at least 10 countries");
             }
 
-            return countries;
+            // Exclude countries not supported by the frontend's GeoJSON map
+            List<CountryDefinition> playableCountries = countries.Where(country => !ExcludedCountryIds.Contains(country.CountryId)).ToList();
+
+            if (playableCountries.Count < 10)
+            {
+                throw new InvalidDataException(
+                    "At least 10 playable countries must be available."
+                );
+            }
+            return playableCountries;
         }
     }
 
