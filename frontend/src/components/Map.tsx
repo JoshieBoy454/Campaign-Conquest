@@ -65,12 +65,6 @@ export default function Map({
     const previousSelectionRef = useRef<string | number | null>(null);
     const countryCentersRef = useRef<Record<string, LngLatPair>>({});
     const driftTimerRef = useRef<number | null>(null);
-    const dragRef = useRef<{
-        sourceId: string;
-        startLngLat: LngLatPair;
-        endLngLat: LngLatPair;
-        valid: boolean;
-    } | null>(null);
     const [rulesOpen, setRulesOpen] = useState(false);
 
     const [selectedCountry, setSelectedCountry] = useState<{
@@ -99,13 +93,6 @@ export default function Map({
         null
     );
     const commitCountRef = useRef(1);
-    const [dragLine, setDragLine] = useState<{
-        x1: number;
-        y1: number;
-        x2: number;
-        y2: number;
-        valid: boolean;
-    } | null>(null);
 
     useEffect(() => {
         commitCountRef.current = commitCount;
@@ -319,7 +306,6 @@ export default function Map({
         });
 
         currentMap.on("click", (event) => {
-            if (dragRef.current) return;
             const features = currentMap.queryRenderedFeatures(event.point, {
                 layers: ["countries-interactive"],
             });
@@ -630,120 +616,55 @@ export default function Map({
         }
     }
 
-    function projectDragLine() {
-        const currentMap = map.current;
-        const drag = dragRef.current;
-        if (!currentMap || !drag) {
-            setDragLine(null);
-            return;
-        }
-        const a = currentMap.project(drag.startLngLat);
-        const b = currentMap.project(drag.endLngLat);
-        setDragLine({
-            x1: a.x,
-            y1: a.y,
-            x2: b.x,
-            y2: b.y,
-            valid: drag.valid,
-        });
-    }
-
-    function clearDrag() {
-        const currentMap = map.current;
-        dragRef.current = null;
-        setDragLine(null);
-        currentMap?.dragPan.enable();
-    }
-
-    // Territory drag (reinforce / attack) — world-anchored arrow
+    // Select source (left-click), then right-click target to transfer or attack.
     useEffect(() => {
         const currentMap = map.current;
         if (!currentMap || !mapReady || !game || !isHost) return;
         const canvas = currentMap.getCanvas();
 
-        const evalValid = (sourceId: string, destId: string | null) => {
-            const human = game.factions.find((f) => f.type === FactionType.Human);
-            const dest = game.territories.find((t) => t.countryId === destId);
-            if (!dest || !human || !destId || destId === sourceId) return false;
-            if (
-                dest.ownerFactionId === human.id &&
-                (game.currentPhase === TurnPhase.ReinforcementOne ||
-                    game.currentPhase === TurnPhase.ReinforcementTwo)
-            ) {
-                return true;
-            }
-            if (
-                dest.ownerFactionId !== human.id &&
-                game.currentPhase === TurnPhase.Combat &&
-                !game.activeCombat
-            ) {
-                return true;
-            }
-            return false;
-        };
+        const onContextMenu = (e: MouseEvent) => {
+            e.preventDefault();
+            if (actionBusy) return;
 
-        const onDown = (e: MouseEvent) => {
-            if (e.button !== 0) return;
             const human = game.factions.find((f) => f.type === FactionType.Human);
             if (!human || game.currentFactionId !== human.id) return;
-            const features = currentMap.queryRenderedFeatures(
-                [e.offsetX, e.offsetY],
-                { layers: ["countries-interactive"] }
-            );
-            const feat = features[0];
-            if (!feat?.id) return;
-            const iso = String(feat.id);
-            const territory = game.territories.find(
-                (t) => t.countryId === iso && t.ownerFactionId === human.id
-            );
-            if (!territory || territory.soldiers < 2) return;
-            const lngLat = currentMap.unproject([e.offsetX, e.offsetY]);
-            const pair: LngLatPair = [lngLat.lng, lngLat.lat];
-            dragRef.current = {
-                sourceId: iso,
-                startLngLat: pair,
-                endLngLat: pair,
-                valid: false,
-            };
-            currentMap.dragPan.disable();
-            projectDragLine();
-        };
 
-        const onMove = (e: MouseEvent) => {
-            if (!dragRef.current) return;
-            const lngLat = currentMap.unproject([e.offsetX, e.offsetY]);
             const features = currentMap.queryRenderedFeatures(
                 [e.offsetX, e.offsetY],
                 { layers: ["countries-interactive"] }
             );
             const destId = features[0]?.id ? String(features[0].id) : null;
-            dragRef.current.endLngLat = [lngLat.lng, lngLat.lat];
-            dragRef.current.valid = evalValid(dragRef.current.sourceId, destId);
-            projectDragLine();
-        };
+            if (!destId) return;
 
-        const onUp = (e: MouseEvent) => {
-            if (!dragRef.current) return;
-            const sourceId = dragRef.current.sourceId;
-            const features = currentMap.queryRenderedFeatures(
-                [e.offsetX, e.offsetY],
-                { layers: ["countries-interactive"] }
+            const sourceId =
+                combatSourceId ??
+                (selectedCountry ? String(selectedCountry.id) : null);
+            if (!sourceId) {
+                setError("Select one of your countries first (2+ soldiers).");
+                return;
+            }
+
+            const source = game.territories.find(
+                (t) =>
+                    t.countryId === sourceId &&
+                    t.ownerFactionId === human.id &&
+                    t.soldiers >= 2
             );
-            const destId = features[0]?.id ? String(features[0].id) : null;
-            clearDrag();
-            if (!destId || destId === sourceId) return;
-            const human = game.factions.find((f) => f.type === FactionType.Human);
-            const source = game.territories.find((t) => t.countryId === sourceId);
             const dest = game.territories.find((t) => t.countryId === destId);
-            if (!human || !source || !dest) return;
+            if (!source) {
+                setError(
+                    "Select an owned country with at least 2 soldiers, then right-click a target."
+                );
+                return;
+            }
+            if (!dest || dest.countryId === source.countryId) return;
 
             const maxSoldiers = Math.max(1, source.soldiers - 1);
+            const reinforcingPhase =
+                game.currentPhase === TurnPhase.ReinforcementOne ||
+                game.currentPhase === TurnPhase.ReinforcementTwo;
 
-            if (
-                dest.ownerFactionId === human.id &&
-                (game.currentPhase === TurnPhase.ReinforcementOne ||
-                    game.currentPhase === TurnPhase.ReinforcementTwo)
-            ) {
+            if (reinforcingPhase && dest.ownerFactionId === human.id) {
                 setPendingCommit({
                     kind: "transfer",
                     sourceId: source.countryId,
@@ -753,13 +674,14 @@ export default function Map({
                     maxSoldiers,
                 });
                 setCommitCount(maxSoldiers);
+                setError(null);
                 return;
             }
 
             if (
-                dest.ownerFactionId !== human.id &&
                 game.currentPhase === TurnPhase.Combat &&
-                !game.activeCombat
+                !game.activeCombat &&
+                dest.ownerFactionId !== human.id
             ) {
                 setPendingCommit({
                     kind: "attack",
@@ -770,40 +692,43 @@ export default function Map({
                     maxSoldiers,
                 });
                 setCommitCount(maxSoldiers);
+                setError(null);
+                return;
+            }
+
+            if (reinforcingPhase) {
+                setError(
+                    "Right-click another country you own to move troops."
+                );
+            } else if (game.currentPhase === TurnPhase.Combat) {
+                setError(
+                    game.activeCombat
+                        ? "Finish or retreat from the current battle first."
+                        : "Right-click an enemy country to attack."
+                );
+            } else {
+                setError("Transfers and attacks are only available in reinforce or combat.");
             }
         };
 
-        const onCancel = () => clearDrag();
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") clearDrag();
+            if (e.key === "Escape") setPendingCommit(null);
         };
 
-        const onCam = () => {
-            if (dragRef.current) projectDragLine();
-        };
-
-        canvas.addEventListener("mousedown", onDown);
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
-        window.addEventListener("pointercancel", onCancel);
-        window.addEventListener("blur", onCancel);
+        canvas.addEventListener("contextmenu", onContextMenu);
         window.addEventListener("keydown", onKey);
-        currentMap.on("move", onCam);
-        currentMap.on("zoom", onCam);
-        currentMap.on("resize", onCam);
         return () => {
-            canvas.removeEventListener("mousedown", onDown);
-            window.removeEventListener("mousemove", onMove);
-            window.removeEventListener("mouseup", onUp);
-            window.removeEventListener("pointercancel", onCancel);
-            window.removeEventListener("blur", onCancel);
+            canvas.removeEventListener("contextmenu", onContextMenu);
             window.removeEventListener("keydown", onKey);
-            currentMap.off("move", onCam);
-            currentMap.off("zoom", onCam);
-            currentMap.off("resize", onCam);
-            clearDrag();
         };
-    }, [game, mapReady, isHost, actionBusy]);
+    }, [
+        game,
+        mapReady,
+        isHost,
+        actionBusy,
+        combatSourceId,
+        selectedCountry,
+    ]);
 
     const selectedCountryData = countries.find(
         (c) => c.countryId === String(selectedCountry?.id)
@@ -924,42 +849,6 @@ export default function Map({
                 >
                     Uplinking world mesh…
                 </div>
-            )}
-
-            {dragLine && (
-                <svg
-                    style={{
-                        position: "absolute",
-                        inset: 0,
-                        zIndex: 14,
-                        pointerEvents: "none",
-                    }}
-                >
-                    <defs>
-                        <marker
-                            id="arrow"
-                            markerWidth="8"
-                            markerHeight="8"
-                            refX="6"
-                            refY="3"
-                            orient="auto"
-                        >
-                            <path
-                                d="M0,0 L6,3 L0,6 Z"
-                                fill={dragLine.valid ? "#2ee6ff" : "#ff4d6d"}
-                            />
-                        </marker>
-                    </defs>
-                    <line
-                        x1={dragLine.x1}
-                        y1={dragLine.y1}
-                        x2={dragLine.x2}
-                        y2={dragLine.y2}
-                        stroke={dragLine.valid ? "#2ee6ff" : "#ff4d6d"}
-                        strokeWidth={2}
-                        markerEnd="url(#arrow)"
-                    />
-                </svg>
             )}
 
             {mode === "select" && !game && !selectedCountry && (

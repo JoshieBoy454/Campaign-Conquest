@@ -157,19 +157,19 @@ export default function PhaseControls({
 
                 {reinforcing && isHumanTurn && !pendingCommit && (
                     <div className="holo-muted" style={{ marginTop: 6, fontSize: 11 }}>
-                        Place from the pool, or drag between your countries to move
-                        troops.
+                        Place from the pool, or select your country then right-click
+                        another you own to move troops.
                     </div>
                 )}
 
                 {isHumanTurn &&
                     game.currentPhase === TurnPhase.Combat &&
                     !combatActive &&
-                    !pendingCommit &&
-                    attackFromName && (
+                    !pendingCommit && (
                         <div className="holo-muted" style={{ marginTop: 6, fontSize: 11 }}>
-                            Attacking from {attackFromName}. Click another owned
-                            land (2+ troops) to change source, or drag to attack.
+                            {attackFromName
+                                ? `Source: ${attackFromName}. Right-click an enemy to attack.`
+                                : "Select your country (2+ troops), then right-click an enemy."}
                         </div>
                     )}
 
