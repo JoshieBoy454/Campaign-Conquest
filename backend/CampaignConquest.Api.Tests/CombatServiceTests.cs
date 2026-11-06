@@ -89,7 +89,8 @@ public class CombatServiceTests {
         Assert.Null(game.ActiveCombat);
         Assert.Equal(2, game.Territories.Single(t => t.CountryId == "BBB").Soldiers);
         Assert.Single(game.ConqueredThisTurn);
-        Assert.Equal(TurnPhase.ReinforcementTwo, game.CurrentPhase);
+        // Player chooses when to leave combat (Skip / Continue) — conquest does not auto-advance.
+        Assert.Equal(TurnPhase.Combat, game.CurrentPhase);
     }
 
     private static GameState BuildCombatScenario(int attackerSoldiers, int defenderSoldiers) {

@@ -222,14 +222,12 @@ public class CombatService {
         ApplyDefeatChecks(game);
 
         game.ActiveCombat = null;
+        game.Version++;
 
         _turnService.CheckForVictory(game);
 
-        if (game.Status == GameStatus.Finished) {
-            return;
-        }
-
-        _turnService.FinishCombatPhase(game, combat.AttackerFactionId);
+        // Stay in Combat phase so the player can attack again or leave via Skip combat.
+        // Retreat only ends the engagement; FinishCombatPhase is player/NPC SkipCombat.
     }
 
     private static void FailCombat(GameState game, CombatState combat) {
