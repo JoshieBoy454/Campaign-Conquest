@@ -18,10 +18,13 @@ public sealed class CombatCommentaryContext
     public required IReadOnlyList<int> DefenderDice { get; init; }
     public required int AttackerCasualties { get; init; }
     public required int DefenderCasualties { get; init; }
+    public required int AttackerSoldiersRemaining { get; init; }
+    public required int DefenderSoldiersRemaining { get; init; }
     public required bool BattleFinished { get; init; }
+    public string? Outcome { get; init; }
 }
 
-// Gemini adapter — no key means we quietly skip and the UI keeps factual combat text
+// Gemini adapter — missing key falls back to colourful factual lines (still posts to Battle AI)
 public class GeminiCombatCommentaryService(
     IConfiguration configuration,
     ILogger<GeminiCombatCommentaryService> logger,
@@ -35,6 +38,7 @@ public class GeminiCombatCommentaryService(
         string? apiKey = configuration["LLM:ApiKey"];
         if (string.IsNullOrWhiteSpace(apiKey))
         {
+            logger.LogInformation("LLM:ApiKey missing — using narrative fallback for Battle AI");
             return FactualLine(context);
         }
 
@@ -53,13 +57,19 @@ public class GeminiCombatCommentaryService(
                         new
                         {
                             text =
-                                "You narrate a turn-based strategy game's battle. Only describe facts in " +
-                                "provided structured event data. Never invent dice, casualties, country captures, " +
-                                "future outcomes, or strategy decisions. Keep it vivid and concise (1-3 sentences).\n\n" +
+                                "You are Battle AI, a dry holo tactical commentator for a sci-fi conquest game. " +
+                                "Speak in 1-2 sharp sentences with personality (wry, tense, or triumphant). " +
+                                "ONLY use the structured facts below — never invent dice, losses, captures, or future plans. " +
+                                "Mention force sizes when relevant. Do not use markdown.\n\n" +
                                 JsonSerializer.Serialize(context)
                         }
                     }
                 }
+            },
+            generationConfig = new
+            {
+                temperature = 0.9,
+                maxOutputTokens = 160,
             }
         };
 
@@ -76,7 +86,11 @@ public class GeminiCombatCommentaryService(
             using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning("Gemini commentary failed: {Status}", response.StatusCode);
+                string body = await response.Content.ReadAsStringAsync(cancellationToken);
+                logger.LogWarning(
+                    "Gemini commentary failed: {Status} {Body}",
+                    response.StatusCode,
+                    body.Length > 240 ? body[..240] : body);
                 return FactualLine(context);
             }
 
@@ -106,11 +120,36 @@ public class GeminiCombatCommentaryService(
 
     private static string FactualLine(CombatCommentaryContext context)
     {
-        string attackerDice = string.Join(",", context.AttackerDice);
-        string defenderDice = string.Join(",", context.DefenderDice);
-        string end = context.BattleFinished ? " Battle resolved." : "";
-        return $"{context.AttackerCountry} rolls [{attackerDice}] vs {context.DefenderCountry} [{defenderDice}]; " +
-               $"losses {context.AttackerCasualties}/{context.DefenderCasualties}.{end}";
+        string atkDice = string.Join("·", context.AttackerDice);
+        string defDice = string.Join("·", context.DefenderDice);
+        string forces =
+            $"{context.AttackerSoldiersRemaining} vs {context.DefenderSoldiersRemaining} still in the fight";
+
+        if (context.BattleFinished)
+        {
+            string end = string.IsNullOrWhiteSpace(context.Outcome)
+                ? "Battle resolved."
+                : context.Outcome!;
+            return $"Round {context.Round}: {context.AttackerCountry} [{atkDice}] into " +
+                   $"{context.DefenderCountry} [{defDice}] — losses {context.AttackerCasualties}/" +
+                   $"{context.DefenderCasualties}. {end}";
+        }
+
+        if (context.DefenderCasualties > context.AttackerCasualties)
+        {
+            return $"Round {context.Round}: {context.AttackerCountry} punches through — dice {atkDice} " +
+                   $"vs {defDice}, defender bleeds {context.DefenderCasualties}. {forces}.";
+        }
+
+        if (context.AttackerCasualties > context.DefenderCasualties)
+        {
+            return $"Round {context.Round}: {context.DefenderCountry} holds the line — {defDice} answers " +
+                   $"{atkDice}. Attackers drop {context.AttackerCasualties}. {forces}.";
+        }
+
+        return $"Round {context.Round}: steel meets steel over {context.AttackerCountry} → " +
+               $"{context.DefenderCountry}. Dice {atkDice} / {defDice}, even trade " +
+               $"{context.AttackerCasualties}/{context.DefenderCasualties}. {forces}.";
     }
 }
 

@@ -98,13 +98,18 @@ public class CombatService {
             SourceCountryId = source.CountryId,
             DestinationCountryId = destination.CountryId,
             AttackerSoldiers = soldierCount,
-            DefenderSoldiers = destination.Soldiers
+            DefenderSoldiers = destination.Soldiers,
+            RoundNumber = 0,
         };
 
         game.Version++;
     }
 
-    public void ResolveNextRound(GameState game, Guid factionId) {
+    /// <summary>
+    /// Resolves one exchange. Returns a snapshot of the round result even when
+    /// ActiveCombat is cleared by conquest / wipe (for log + commentary).
+    /// </summary>
+    public CombatState ResolveNextRound(GameState game, Guid factionId) {
 
         TurnService.RequireActiveFaction(game, factionId);
 
@@ -115,6 +120,8 @@ public class CombatService {
                 "Only the attacker can roll combat dice"
             );
         }
+
+        combat.RoundNumber += 1;
 
         int attackerDiceCount = Math.Min(2, combat.AttackerSoldiers);
         int defenderDiceCount = Math.Min(2, combat.DefenderSoldiers);
@@ -132,18 +139,35 @@ public class CombatService {
         combat.LastAttackerLosses = attackerLosses;
         combat.LastDefenderLosses = defenderLosses;
 
+        CombatState snapshot = CloneCombat(combat);
+
         if (combat.DefenderSoldiers <= 0) {
             CompleteConquest(game, combat);
-            return;
+            return snapshot;
         }
 
         if (combat.AttackerSoldiers <= 0) {
             FailCombat(game, combat);
-            return;
+            return snapshot;
         }
 
         game.Version++;
+        return snapshot;
     }
+
+    private static CombatState CloneCombat(CombatState combat) => new() {
+        AttackerFactionId = combat.AttackerFactionId,
+        DefenderFactionId = combat.DefenderFactionId,
+        SourceCountryId = combat.SourceCountryId,
+        DestinationCountryId = combat.DestinationCountryId,
+        AttackerSoldiers = combat.AttackerSoldiers,
+        DefenderSoldiers = combat.DefenderSoldiers,
+        RoundNumber = combat.RoundNumber,
+        LastAttackerDice = [.. combat.LastAttackerDice],
+        LastDefenderDice = [.. combat.LastDefenderDice],
+        LastAttackerLosses = combat.LastAttackerLosses,
+        LastDefenderLosses = combat.LastDefenderLosses,
+    };
 
     public void Retreat(GameState game, Guid factionId) {
 

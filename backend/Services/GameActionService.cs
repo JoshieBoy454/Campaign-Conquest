@@ -63,7 +63,13 @@ public class GameActionService {
                 Guid actorId = RequireCurrentFaction(game);
                 _turnService.AdvancePhase(game, actorId);
             },
-            cancellationToken);
+            cancellationToken,
+            game => new {
+                phase = game.CurrentPhase.ToString(),
+                factionId = game.CurrentFactionId,
+                factionName = FactionName(game, game.CurrentFactionId),
+                reinforcementPool = game.ReinforcementPool,
+            });
     }
 
     public Task<GameState> AllocateReinforcements(
@@ -83,7 +89,17 @@ public class GameActionService {
                 Guid actorId = RequireCurrentFaction(game);
                 _turnService.AllocateReinforcements(game, actorId, countryId, soldierCount);
             },
-            cancellationToken);
+            cancellationToken,
+            game => {
+                Territory? t = FindTerritory(game, countryId);
+                return new {
+                    countryId,
+                    countryName = t?.Name ?? countryId,
+                    soldierCount,
+                    soldiersOnCountry = t?.Soldiers ?? 0,
+                    poolRemaining = game.ReinforcementPool,
+                };
+            });
     }
 
     public Task<GameState> TransferSoldiers(
@@ -109,7 +125,20 @@ public class GameActionService {
                     destinationCountryId,
                     soldierCount);
             },
-            cancellationToken);
+            cancellationToken,
+            game => {
+                Territory? src = FindTerritory(game, sourceCountryId);
+                Territory? dst = FindTerritory(game, destinationCountryId);
+                return new {
+                    sourceCountryId,
+                    sourceName = src?.Name ?? sourceCountryId,
+                    destinationCountryId,
+                    destinationName = dst?.Name ?? destinationCountryId,
+                    soldierCount,
+                    sourceSoldiers = src?.Soldiers ?? 0,
+                    destinationSoldiers = dst?.Soldiers ?? 0,
+                };
+            });
     }
 
     public Task<GameState> StartCombat(
@@ -135,7 +164,18 @@ public class GameActionService {
                     destinationCountryId,
                     soldierCount);
             },
-            cancellationToken);
+            cancellationToken,
+            game => {
+                CombatState? c = game.ActiveCombat;
+                return new {
+                    sourceCountryId,
+                    sourceName = TerritoryName(game, sourceCountryId),
+                    destinationCountryId,
+                    destinationName = TerritoryName(game, destinationCountryId),
+                    attackerSoldiers = c?.AttackerSoldiers ?? soldierCount,
+                    defenderSoldiers = c?.DefenderSoldiers ?? 0,
+                };
+            });
     }
 
     public async Task<GameState> ResolveCombatRound(
@@ -144,6 +184,10 @@ public class GameActionService {
         string? actionId,
         CancellationToken cancellationToken = default) {
 
+        CombatState? roundSnapshot = null;
+        string sourceName = "";
+        string destinationName = "";
+
         GameState game = await ExecuteAsync(
             gameId,
             expectedVersion,
@@ -151,29 +195,56 @@ public class GameActionService {
             "ResolveCombatRound",
             state => {
                 Guid actorId = RequireCurrentFaction(state);
-                _combatService.ResolveNextRound(state, actorId);
+                CombatState? before = state.ActiveCombat;
+                sourceName = TerritoryName(state, before?.SourceCountryId);
+                destinationName = TerritoryName(state, before?.DestinationCountryId);
+                roundSnapshot = _combatService.ResolveNextRound(state, actorId);
             },
-            cancellationToken);
+            cancellationToken,
+            _ => roundSnapshot == null
+                ? null
+                : new {
+                    sourceCountryId = roundSnapshot.SourceCountryId,
+                    sourceName,
+                    destinationCountryId = roundSnapshot.DestinationCountryId,
+                    destinationName,
+                    round = roundSnapshot.RoundNumber,
+                    attackerDice = roundSnapshot.LastAttackerDice,
+                    defenderDice = roundSnapshot.LastDefenderDice,
+                    attackerLosses = roundSnapshot.LastAttackerLosses,
+                    defenderLosses = roundSnapshot.LastDefenderLosses,
+                    attackerSoldiersRemaining = roundSnapshot.AttackerSoldiers,
+                    defenderSoldiersRemaining = roundSnapshot.DefenderSoldiers,
+                    battleFinished = roundSnapshot.AttackerSoldiers <= 0
+                        || roundSnapshot.DefenderSoldiers <= 0,
+                });
 
-        // commentary is best-effort — never blocks the dice result
-        QueueCommentary(game);
+        if (roundSnapshot != null) {
+            QueueCommentary(game, roundSnapshot);
+        }
+
         return game;
     }
 
-    private void QueueCommentary(GameState game) {
-        CombatState? combat = game.ActiveCombat;
-        if (combat == null) {
-            return;
-        }
-
-        string attackerCountry = combat.SourceCountryId;
-        string defenderCountry = combat.DestinationCountryId;
+    private void QueueCommentary(GameState game, CombatState combat) {
+        string attackerCountry = TerritoryName(game, combat.SourceCountryId);
+        string defenderCountry = TerritoryName(game, combat.DestinationCountryId);
         int[] attackerDice = combat.LastAttackerDice.ToArray();
         int[] defenderDice = combat.LastDefenderDice.ToArray();
         int attackerLosses = combat.LastAttackerLosses;
         int defenderLosses = combat.LastDefenderLosses;
         bool finished = combat.AttackerSoldiers <= 0 || combat.DefenderSoldiers <= 0;
+        string? outcome = null;
+        if (finished) {
+            outcome = combat.DefenderSoldiers <= 0
+                ? $"{attackerCountry} takes {defenderCountry}."
+                : $"{attackerCountry}'s assault on {defenderCountry} collapses.";
+        }
+
         Guid gameId = game.Id;
+        int round = Math.Max(1, combat.RoundNumber);
+        int atkLeft = Math.Max(0, combat.AttackerSoldiers);
+        int defLeft = Math.Max(0, combat.DefenderSoldiers);
 
         _ = Task.Run(async () => {
             try {
@@ -181,12 +252,15 @@ public class GameActionService {
                     new CombatCommentaryContext {
                         AttackerCountry = attackerCountry,
                         DefenderCountry = defenderCountry,
-                        Round = Math.Max(1, attackerDice.Length),
+                        Round = round,
                         AttackerDice = attackerDice,
                         DefenderDice = defenderDice,
                         AttackerCasualties = attackerLosses,
                         DefenderCasualties = defenderLosses,
+                        AttackerSoldiersRemaining = atkLeft,
+                        DefenderSoldiersRemaining = defLeft,
                         BattleFinished = finished,
+                        Outcome = outcome,
                     },
                     CancellationToken.None);
 
@@ -218,16 +292,31 @@ public class GameActionService {
         string? actionId,
         CancellationToken cancellationToken = default) {
 
+        string? sourceId = null;
+        string? destId = null;
+        int retreated = 0;
+
         return ExecuteAsync(
             gameId,
             expectedVersion,
             actionId,
             "RetreatCombat",
             game => {
+                CombatState? c = game.ActiveCombat;
+                sourceId = c?.SourceCountryId;
+                destId = c?.DestinationCountryId;
+                retreated = c?.AttackerSoldiers ?? 0;
                 Guid actorId = RequireCurrentFaction(game);
                 _combatService.Retreat(game, actorId);
             },
-            cancellationToken);
+            cancellationToken,
+            game => new {
+                sourceCountryId = sourceId,
+                sourceName = sourceId == null ? null : TerritoryName(game, sourceId),
+                destinationCountryId = destId,
+                destinationName = destId == null ? null : TerritoryName(game, destId),
+                soldiersRetreated = retreated,
+            });
     }
 
     public Task<GameState> SetNpcSpeed(
@@ -263,7 +352,8 @@ public class GameActionService {
         string? actionId,
         string eventType,
         Action<GameState> mutate,
-        CancellationToken cancellationToken) {
+        CancellationToken cancellationToken,
+        Func<GameState, object?>? payloadFactory = null) {
 
         string? idempotencyKey = BuildIdempotencyKey(gameId, actionId);
 
@@ -298,7 +388,8 @@ public class GameActionService {
 
             // Event log / SignalR must not roll a successful mutate into HTTP 500.
             try {
-                await AppendEventAsync(gameId, actionId, eventType, game, cancellationToken);
+                object? extra = payloadFactory?.Invoke(game);
+                await AppendEventAsync(gameId, actionId, eventType, game, extra, cancellationToken);
             }
             catch {
                 // best-effort
@@ -327,19 +418,26 @@ public class GameActionService {
         string? actionId,
         string eventType,
         GameState game,
+        object? extra,
         CancellationToken cancellationToken) {
 
-        string payloadJson = JsonSerializer.Serialize(new {
-            actionId,
-            version = game.Version,
-        });
+        Dictionary<string, object?> payload = new() {
+            ["actionId"] = actionId,
+            ["version"] = game.Version,
+        };
+
+        if (extra != null) {
+            foreach (var prop in extra.GetType().GetProperties()) {
+                payload[prop.Name] = prop.GetValue(extra);
+            }
+        }
 
         GameEvent gameEvent = new() {
             GameId = gameId,
             EventId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString("N") : actionId.Trim(),
             Type = eventType,
             OccurredAtUtc = DateTime.UtcNow,
-            PayloadJson = payloadJson,
+            PayloadJson = JsonSerializer.Serialize(payload),
         };
 
         await _gameEventRepository.AppendAsync(gameEvent, cancellationToken);
@@ -349,6 +447,28 @@ public class GameActionService {
 
         return game.CurrentFactionId
             ?? throw new InvalidOperationException("No faction is currently active");
+    }
+
+    private static string TerritoryName(GameState game, string? countryId) {
+        if (string.IsNullOrWhiteSpace(countryId)) {
+            return "?";
+        }
+
+        Territory? t = FindTerritory(game, countryId);
+        return string.IsNullOrWhiteSpace(t?.Name) ? countryId : t!.Name;
+    }
+
+    private static Territory? FindTerritory(GameState game, string countryId) {
+        return game.Territories.FirstOrDefault(t =>
+            string.Equals(t.CountryId, countryId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? FactionName(GameState game, Guid? factionId) {
+        if (factionId == null) {
+            return null;
+        }
+
+        return game.Factions.FirstOrDefault(f => f.Id == factionId)?.Name;
     }
 
     private static string? BuildIdempotencyKey(Guid gameId, string? actionId) {

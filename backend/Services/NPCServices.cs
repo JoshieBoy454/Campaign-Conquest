@@ -366,12 +366,17 @@ public class NpcTurnHostedService : BackgroundService {
                     new CombatCommentaryContext {
                         AttackerCountry = last.SourceCountryId,
                         DefenderCountry = last.DestinationCountryId,
-                        Round = Math.Max(1, last.AttackerDice.Length),
+                        Round = rounds.Count,
                         AttackerDice = last.AttackerDice,
                         DefenderDice = last.DefenderDice,
                         AttackerCasualties = last.AttackerLosses,
                         DefenderCasualties = last.DefenderLosses,
+                        AttackerSoldiersRemaining = 0,
+                        DefenderSoldiersRemaining = 0,
                         BattleFinished = last.BattleFinished,
+                        Outcome = last.BattleFinished
+                            ? "NPC engagement resolved."
+                            : null,
                     },
                     CancellationToken.None);
 

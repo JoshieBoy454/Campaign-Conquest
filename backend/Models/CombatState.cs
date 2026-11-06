@@ -15,6 +15,9 @@ public class CombatState {
 
     public int DefenderSoldiers { get; set; }
 
+    /// <summary>1-based combat exchange counter for commentary / log.</summary>
+    public int RoundNumber { get; set; }
+
     public List<int> LastAttackerDice { get; set; } = new();
 
     public List<int> LastDefenderDice { get; set; } = new();

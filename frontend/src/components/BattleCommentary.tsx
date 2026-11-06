@@ -3,8 +3,10 @@ import { fetchEventsAfter } from "../services/gameEvents";
 
 type Props = { gameId: string };
 
+type Line = { id: string; text: string };
+
 export default function BattleCommentary({ gameId }: Props) {
-    const [lines, setLines] = useState<string[]>([]);
+    const [lines, setLines] = useState<Line[]>([]);
     const [error, setError] = useState<string | null>(null);
     const afterRef = useRef(0);
 
@@ -38,19 +40,24 @@ export default function BattleCommentary({ gameId }: Props) {
                         const payload = JSON.parse(r.payloadJson ?? "{}") as {
                             commentary?: string;
                         };
-                        return payload.commentary ?? "";
+                        const text = payload.commentary?.trim() ?? "";
+                        return text ? { id: r.eventId, text } : null;
                     } catch {
-                        return "";
+                        return null;
                     }
                 })
-                .filter(Boolean);
+                .filter((x): x is Line => x != null);
 
             afterRef.current = Math.max(
                 afterRef.current,
                 ...rows.map((r) => r.sequence)
             );
             if (commentary.length) {
-                setLines((prev) => [...prev, ...commentary].slice(-12));
+                setLines((prev) => {
+                    const seen = new Set(prev.map((l) => l.id));
+                    const incoming = commentary.filter((c) => !seen.has(c.id));
+                    return [...incoming.reverse(), ...prev].slice(0, 16);
+                });
             }
         }
 
@@ -70,19 +77,22 @@ export default function BattleCommentary({ gameId }: Props) {
                 </p>
             )}
             {!error && lines.length === 0 && (
-                <p className="holo-muted">Awaiting battle chatter…</p>
+                <p className="holo-muted">
+                    Battle AI stands by — roll combat to hear the call.
+                </p>
             )}
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {lines.map((line, i) => (
+                {lines.map((line) => (
                     <li
-                        key={`${i}-${line.slice(0, 12)}`}
+                        key={line.id}
                         style={{
                             borderBottom: "1px solid var(--holo-border-dim)",
-                            padding: "6px 0",
+                            padding: "8px 0",
                             fontSize: 13,
+                            lineHeight: 1.45,
                         }}
                     >
-                        {line}
+                        {line.text}
                     </li>
                 ))}
             </ul>

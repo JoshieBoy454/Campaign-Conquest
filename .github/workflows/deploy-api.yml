@@ -31,6 +31,7 @@ jobs:
           SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
           if [ -z "$SSH_KEY" ] || [ -z "$EC2_HOST" ]; then
             echo "::error::EC2_SSH_KEY / EC2_HOST secrets missing — cannot deploy API."
@@ -42,10 +43,27 @@ jobs:
           # Preserve PEM newlines from the multiline secret
           printf '%s\n' "$SSH_KEY" > /tmp/ec2.pem
           scp -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem api.tgz "$USERNAME@$EC2_HOST:/tmp/campaign-api.tgz"
-          ssh -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem "$USERNAME@$EC2_HOST" <<'EOF'
+          # Optional Gemini key for Battle AI (GitHub secret LLM_API_KEY → LLM__ApiKey)
+          if [ -n "${LLM_API_KEY:-}" ]; then
+            printf 'LLM__ApiKey=%s\n' "$LLM_API_KEY" > /tmp/campaign-llm.env
+            scp -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem /tmp/campaign-llm.env "$USERNAME@$EC2_HOST:/tmp/campaign-llm.env"
+            rm -f /tmp/campaign-llm.env
+          fi
+          ssh -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem "$USERNAME@$EC2_HOST" \
+            LLM_PRESENT="$([ -n "${LLM_API_KEY:-}" ] && echo 1 || echo 0)" bash <<'EOF'
             set -euo pipefail
             sudo mkdir -p /var/www/campaign-api
             sudo tar -xzf /tmp/campaign-api.tgz -C /var/www/campaign-api
+            if [ "${LLM_PRESENT}" = "1" ] && [ -f /tmp/campaign-llm.env ]; then
+              sudo mkdir -p /etc/campaign-conquest
+              sudo mv /tmp/campaign-llm.env /etc/campaign-conquest/llm.env
+              sudo chmod 600 /etc/campaign-conquest/llm.env
+              sudo tee /etc/systemd/system/campaign-api.service.d/llm.conf >/dev/null <<'UNIT'
+            [Service]
+            EnvironmentFile=-/etc/campaign-conquest/llm.env
+            UNIT
+              sudo systemctl daemon-reload
+            fi
             sudo systemctl restart campaign-api
             sudo systemctl --no-pager --full status campaign-api || true
             curl -fsS http://127.0.0.1/health || curl -fsS http://127.0.0.1:5212/health || true
