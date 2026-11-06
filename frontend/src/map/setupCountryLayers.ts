@@ -170,6 +170,8 @@ export function addCountryLayers(map: MapLibreMap, data: FeatureCollection) {
             ],
             "fill-opacity": [
                 "case",
+                ["boolean", ["feature-state", "selected"], false],
+                0.55,
                 ["boolean", ["feature-state", "hasOwner"], false],
                 0.35,
                 0,
@@ -193,8 +195,14 @@ export function addCountryLayers(map: MapLibreMap, data: FeatureCollection) {
             "line-width": [
                 "case",
                 ["boolean", ["feature-state", "selected"], false],
-                2.5,
+                3.5,
                 1,
+            ],
+            "line-opacity": [
+                "case",
+                ["boolean", ["feature-state", "selected"], false],
+                1,
+                0.85,
             ],
         },
     });
@@ -247,9 +255,10 @@ export function setParticipation(
     for (const iso of participating) {
         const color = ownerColorByIso[iso];
         if (!color) continue;
+        // Do not touch `selected` — game polls would clear the highlight.
         map.setFeatureState(
             { source: "countries", id: iso },
-            { hasOwner: true, factionColor: color, selected: false }
+            { hasOwner: true, factionColor: color }
         );
     }
 

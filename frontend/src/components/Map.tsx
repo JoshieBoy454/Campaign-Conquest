@@ -20,7 +20,7 @@ import { pointOnFeature } from "@turf/point-on-feature";
 import type { FeatureCollection } from "geojson";
 import CountryInfoPanel from "./CountryInfoPanel";
 import FactionPanel from "./FactionPanel";
-import PhaseControls from "./PhaseControls";
+import PhaseControls, { type PendingCommit } from "./PhaseControls";
 import DiceOverlay from "./DiceOverlay";
 import ActionLog from "./ActionLog";
 import BattleCommentary from "./BattleCommentary";
@@ -89,6 +89,16 @@ export default function Map({
     const [countriesGeometryReady, setCountriesGeometryReady] = useState(false);
     const [countryCentersReady, setCountryCentersReady] = useState(false);
     const [presentationSpeed, setPresentationSpeed] = useState<1 | 2>(1);
+    const [commitCount, setCommitCount] = useState(1);
+    const [pendingCommit, setPendingCommit] = useState<PendingCommit | null>(
+        null
+    );
+    const [combatSourceId, setCombatSourceId] = useState<string | null>(null);
+    const [heldCombat, setHeldCombat] = useState<GameState["activeCombat"]>(null);
+    const lastCombatRef = useRef<NonNullable<GameState["activeCombat"]> | null>(
+        null
+    );
+    const commitCountRef = useRef(1);
     const [dragLine, setDragLine] = useState<{
         x1: number;
         y1: number;
@@ -96,6 +106,10 @@ export default function Map({
         y2: number;
         valid: boolean;
     } | null>(null);
+
+    useEffect(() => {
+        commitCountRef.current = commitCount;
+    }, [commitCount]);
 
     function mergeGame(next: GameState) {
         setGame((prev) => (!prev || next.version >= prev.version ? next : prev));
@@ -345,6 +359,7 @@ export default function Map({
             setSelectedCountry({ id: countryId, name: countryName });
         });
 
+
         return () => {
             cancelled = true;
             if (driftTimerRef.current) {
@@ -430,6 +445,14 @@ export default function Map({
             participating,
             colors
         );
+        // Re-apply selection after ownership refresh so highlight sticks.
+        const selectedId = previousSelectionRef.current;
+        if (selectedId != null) {
+            currentMap.setFeatureState(
+                { source: "countries", id: selectedId },
+                { selected: true }
+            );
+        }
     }, [game, mapReady]);
 
     // Presentation speed → NPC API (soft-retry once on version conflict)
@@ -558,12 +581,13 @@ export default function Map({
         });
     }
 
-    async function runGameAction(action: () => Promise<GameState>) {
-        if (!game || actionBusy) return;
+    async function runGameAction(action: () => Promise<GameState>): Promise<boolean> {
+        if (!game || actionBusy) return false;
         setActionBusy(true);
         setError(null);
         try {
             mergeGame(await action());
+            return true;
         } catch (err) {
             setError(err instanceof Error ? err.message : "Action failed.");
             try {
@@ -571,6 +595,7 @@ export default function Map({
             } catch {
                 /* ignore */
             }
+            return false;
         } finally {
             setActionBusy(false);
         }
@@ -712,21 +737,22 @@ export default function Map({
             const dest = game.territories.find((t) => t.countryId === destId);
             if (!human || !source || !dest) return;
 
+            const maxSoldiers = Math.max(1, source.soldiers - 1);
+
             if (
                 dest.ownerFactionId === human.id &&
                 (game.currentPhase === TurnPhase.ReinforcementOne ||
                     game.currentPhase === TurnPhase.ReinforcementTwo)
             ) {
-                const count = Math.max(1, source.soldiers - 1);
-                void runGameAction(() =>
-                    transferSoldiers(
-                        game.id,
-                        game.version,
-                        source.countryId,
-                        dest.countryId,
-                        count
-                    )
-                );
+                setPendingCommit({
+                    kind: "transfer",
+                    sourceId: source.countryId,
+                    sourceName: source.name,
+                    destId: dest.countryId,
+                    destName: dest.name,
+                    maxSoldiers,
+                });
+                setCommitCount(maxSoldiers);
                 return;
             }
 
@@ -735,16 +761,15 @@ export default function Map({
                 game.currentPhase === TurnPhase.Combat &&
                 !game.activeCombat
             ) {
-                const commit = Math.max(1, source.soldiers - 1);
-                void runGameAction(() =>
-                    startCombat(
-                        game.id,
-                        game.version,
-                        source.countryId,
-                        dest.countryId,
-                        commit
-                    )
-                );
+                setPendingCommit({
+                    kind: "attack",
+                    sourceId: source.countryId,
+                    sourceName: source.name,
+                    destId: dest.countryId,
+                    destName: dest.name,
+                    maxSoldiers,
+                });
+                setCommitCount(maxSoldiers);
             }
         };
 
@@ -792,6 +817,89 @@ export default function Map({
     const activeFaction = game?.factions.find(
         (f) => f.id === game.currentFactionId
     );
+
+    const humanFaction = game?.factions.find((f) => f.type === FactionType.Human);
+
+    // Remember last owned land clicked as the attack source (not always home).
+    useEffect(() => {
+        if (!selectedTerritory || !humanFaction) return;
+        if (
+            selectedTerritory.ownerFactionId === humanFaction.id &&
+            selectedTerritory.soldiers >= 2
+        ) {
+            setCombatSourceId(selectedTerritory.countryId);
+        }
+    }, [selectedTerritory, humanFaction]);
+
+    const rememberedSource =
+        combatSourceId != null
+            ? game?.territories.find(
+                  (t) =>
+                      t.countryId === combatSourceId &&
+                      t.ownerFactionId === humanFaction?.id &&
+                      t.soldiers >= 2
+              )
+            : undefined;
+
+    const attackSource =
+        rememberedSource ??
+        (selectedTerritory &&
+        humanFaction &&
+        selectedTerritory.ownerFactionId === humanFaction.id &&
+        selectedTerritory.soldiers >= 2
+            ? selectedTerritory
+            : null);
+
+    const reinforcing =
+        game?.currentPhase === TurnPhase.ReinforcementOne ||
+        game?.currentPhase === TurnPhase.ReinforcementTwo;
+    const canPlaceOnSelected = Boolean(
+        selectedTerritory &&
+            humanFaction &&
+            selectedTerritory.ownerFactionId === humanFaction.id &&
+            (game?.reinforcementPool ?? 0) > 0
+    );
+
+    let commitMax = 1;
+    if (pendingCommit) {
+        commitMax = Math.max(1, pendingCommit.maxSoldiers);
+    } else if (reinforcing) {
+        commitMax = Math.max(1, game?.reinforcementPool ?? 1);
+    } else if (attackSource) {
+        commitMax = Math.max(1, attackSource.soldiers - 1);
+    }
+
+    useEffect(() => {
+        setPendingCommit(null);
+        setCombatSourceId(null);
+    }, [game?.id, game?.currentPhase, game?.currentFactionId]);
+
+    useEffect(() => {
+        setCommitCount((prev) => Math.min(commitMax, Math.max(1, prev || commitMax)));
+    }, [commitMax]);
+
+    // Hold the finishing combat panel so the last dice roll is visible.
+    useEffect(() => {
+        const live = game?.activeCombat ?? game?.lastResolvedCombat ?? null;
+        if (live) {
+            lastCombatRef.current = live;
+            setHeldCombat(live);
+            return;
+        }
+        if (!lastCombatRef.current) {
+            setHeldCombat(null);
+            return;
+        }
+        setHeldCombat(lastCombatRef.current);
+        const handle = window.setTimeout(() => {
+            lastCombatRef.current = null;
+            setHeldCombat(null);
+        }, 2200);
+        return () => window.clearTimeout(handle);
+    }, [game?.activeCombat, game?.lastResolvedCombat, game?.version]);
+
+    const displayCombat =
+        game?.activeCombat ?? game?.lastResolvedCombat ?? heldCombat;
 
     return (
         <div style={{ width: "100%", height: "100dvh", position: "relative" }}>
@@ -958,19 +1066,19 @@ export default function Map({
                     onSpeedChange={setPresentationSpeed}
                 >
                     <DiceOverlay
-                        combat={game.activeCombat}
+                        combat={displayCombat}
                         sourceName={
                             game.territories.find(
                                 (t) =>
                                     t.countryId ===
-                                    game.activeCombat?.sourceCountryId
+                                    displayCombat?.sourceCountryId
                             )?.name
                         }
                         destinationName={
                             game.territories.find(
                                 (t) =>
                                     t.countryId ===
-                                    game.activeCombat?.destinationCountryId
+                                    displayCombat?.destinationCountryId
                             )?.name
                         }
                     />
@@ -982,44 +1090,82 @@ export default function Map({
                                 activeFaction?.type === FactionType.Human &&
                                 selectedTerritory.ownerFactionId !==
                                     activeFaction.id &&
-                                game.territories.some(
-                                    (t) =>
-                                        t.ownerFactionId === activeFaction.id &&
-                                        t.soldiers >= 2
-                                )
+                                attackSource
                         )}
+                        canPlaceOnSelected={canPlaceOnSelected}
+                        attackFromName={attackSource?.name}
                         battleSourceName={
                             game.territories.find(
                                 (t) =>
                                     t.countryId ===
-                                    game.activeCombat?.sourceCountryId
+                                    displayCombat?.sourceCountryId
                             )?.name
                         }
                         battleDestName={
                             game.territories.find(
                                 (t) =>
                                     t.countryId ===
-                                    game.activeCombat?.destinationCountryId
+                                    displayCombat?.destinationCountryId
                             )?.name
                         }
+                        commitCount={commitCount}
+                        commitMax={commitMax}
+                        onCommitCountChange={setCommitCount}
+                        pendingCommit={pendingCommit}
+                        onClearPending={() => setPendingCommit(null)}
+                        onConfirmPending={() => {
+                            if (!pendingCommit) return;
+                            const pending = pendingCommit;
+                            const count = Math.min(
+                                commitCountRef.current,
+                                pending.maxSoldiers
+                            );
+                            void (async () => {
+                                const ok =
+                                    pending.kind === "transfer"
+                                        ? await runGameAction(() =>
+                                              transferSoldiers(
+                                                  game.id,
+                                                  game.version,
+                                                  pending.sourceId,
+                                                  pending.destId,
+                                                  Math.max(1, count)
+                                              )
+                                          )
+                                        : await runGameAction(() =>
+                                              startCombat(
+                                                  game.id,
+                                                  game.version,
+                                                  pending.sourceId,
+                                                  pending.destId,
+                                                  Math.max(1, count)
+                                              )
+                                          );
+                                if (ok) setPendingCommit(null);
+                            })();
+                        }}
                         onAdvance={() =>
                             void runGameAction(() =>
                                 advancePhase(game.id, game.version)
                             )
                         }
                         onAllocate={() => {
-                            if (!selectedCountry) {
+                            if (!selectedCountry || !canPlaceOnSelected) {
                                 setError(
                                     "Select one of your countries to place troops."
                                 );
                                 return;
                             }
+                            const n = Math.min(
+                                commitCountRef.current,
+                                game.reinforcementPool
+                            );
                             void runGameAction(() =>
                                 allocateReinforcements(
                                     game.id,
                                     game.version,
                                     String(selectedCountry.id),
-                                    1
+                                    Math.max(1, n)
                                 )
                             );
                         }}
@@ -1034,14 +1180,8 @@ export default function Map({
                             )
                         }
                         onAttackSelected={() => {
-                            const human = game.factions.find(
-                                (f) => f.type === FactionType.Human
-                            );
-                            const source = game.territories.find(
-                                (t) =>
-                                    t.ownerFactionId === human?.id &&
-                                    t.soldiers >= 2
-                            );
+                            const human = humanFaction;
+                            const source = attackSource;
                             const target = selectedTerritory;
                             if (
                                 !source ||
@@ -1054,13 +1194,18 @@ export default function Map({
                                 );
                                 return;
                             }
+                            const max = Math.max(1, source.soldiers - 1);
+                            const count = Math.min(
+                                commitCountRef.current,
+                                max
+                            );
                             void runGameAction(() =>
                                 startCombat(
                                     game.id,
                                     game.version,
                                     source.countryId,
                                     target.countryId,
-                                    Math.max(1, source.soldiers - 1)
+                                    Math.max(1, count)
                                 )
                             );
                         }}
@@ -1083,19 +1228,19 @@ export default function Map({
                     }}
                 >
                     <DiceOverlay
-                        combat={game.activeCombat}
+                        combat={displayCombat}
                         sourceName={
                             game.territories.find(
                                 (t) =>
                                     t.countryId ===
-                                    game.activeCombat?.sourceCountryId
+                                    displayCombat?.sourceCountryId
                             )?.name
                         }
                         destinationName={
                             game.territories.find(
                                 (t) =>
                                     t.countryId ===
-                                    game.activeCombat?.destinationCountryId
+                                    displayCombat?.destinationCountryId
                             )?.name
                         }
                     />

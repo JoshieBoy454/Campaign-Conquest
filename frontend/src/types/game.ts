@@ -72,6 +72,7 @@
     
         version: number;
         activeCombat?: CombatState | null;
+        lastResolvedCombat?: CombatState | null;
         npcSpeed?: number;
     }
 

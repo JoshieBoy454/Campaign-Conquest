@@ -48,6 +48,9 @@ public class GameState {
     // ---- Ongoing combat (null when not fighting) ----
     public CombatState? ActiveCombat { get; set; }
 
+    // Last dice result kept after a fight ends so the HUD can show the finishing roll.
+    public CombatState? LastResolvedCombat { get; set; }
+
     // ---- NPC autoplay delay multiplier (1 = normal) ----
     public int NpcSpeed { get; set; } = 1;
 }

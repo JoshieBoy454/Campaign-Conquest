@@ -92,6 +92,7 @@ public class CombatService {
 
         source.Soldiers -= soldierCount;
 
+        game.LastResolvedCombat = null;
         game.ActiveCombat = new CombatState {
             AttackerFactionId = attacker.Id,
             DefenderFactionId = defenderFactionId,
@@ -140,6 +141,7 @@ public class CombatService {
         combat.LastDefenderLosses = defenderLosses;
 
         CombatState snapshot = CloneCombat(combat);
+        game.LastResolvedCombat = snapshot;
 
         if (combat.DefenderSoldiers <= 0) {
             CompleteConquest(game, combat);
@@ -204,6 +206,7 @@ public class CombatService {
             );
         }
 
+        game.LastResolvedCombat = null;
         _turnService.FinishCombatPhase(game, factionId);
     }
 

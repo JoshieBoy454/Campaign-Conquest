@@ -85,9 +85,6 @@ export default function TroopPool({
                         gap: 4,
                     }}
                 >
-                    <div className="holo-muted" style={{ fontSize: 11 }}>
-                        Available to place
-                    </div>
                     <div
                         style={{
                             fontSize: 28,
