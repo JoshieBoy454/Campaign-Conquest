@@ -63,13 +63,24 @@ function badgeTexture(count: number, fill: number): Texture {
     return Texture.from(canvas);
 }
 
-/** Art faces north (+up). Pixi rotation 0 faces east. */
+/**
+ * Soldier art faces north (toward top of texture).
+ * Pixi y grows downward; atan2 from +X, then align art-forward (-Y) to the target.
+ */
 function facingRotation(
     from: { x: number; y: number },
     to: { x: number; y: number }
 ): number {
     return Math.atan2(to.y - from.y, to.x - from.x) + Math.PI / 2;
 }
+
+/** Shared idle facing so every garrison points the same way on the map. */
+const IDLE_FACING = 0;
+
+/** Display scale — ~3× prior size ("at least 200% bigger"). */
+const SCALE_IDLE = 1.15;
+const SCALE_COMBAT = 1.3;
+const SCALE_FX = 1.2;
 
 export default function PixiArmyLayer({
     map,
@@ -195,21 +206,25 @@ export default function PixiArmyLayer({
             const p = map.project(ll);
             const textures = animTexturesRef.current.get(anim);
             const color = ownerColor(ownerId);
-            const scale = opts?.scale ?? 0.42;
+            const scale = opts?.scale ?? SCALE_IDLE;
 
             if (textures && textures.length > 0) {
                 const sprite = new AnimatedSprite(textures);
-                sprite.anchor.set(0.5, 0.62);
-                sprite.animationSpeed = opts?.speed ?? (anim === "idle" ? 0.12 : 0.28);
+                sprite.anchor.set(0.5, 0.55);
+                sprite.animationSpeed =
+                    opts?.speed ?? (anim === "idle" ? 0.12 : 0.28);
                 sprite.loop = opts?.loop ?? anim !== "hit";
                 sprite.tint = color;
-                sprite.width = 96 * scale;
-                sprite.height = 96 * scale;
+                // Uniform scale keeps facing consistent (avoid width/height skew).
+                const base = textures[0].width || 96;
+                sprite.scale.set((96 * scale) / base);
                 sprite.x = p.x + offset.x;
-                sprite.y = p.y - 10 + offset.y;
+                sprite.y = p.y - 12 + offset.y;
                 if (faceToward) {
                     const t = map.project(faceToward);
                     sprite.rotation = facingRotation(sprite, t);
+                } else {
+                    sprite.rotation = IDLE_FACING;
                 }
                 sprite.play();
                 parent.addChild(sprite);
@@ -217,11 +232,11 @@ export default function PixiArmyLayer({
             }
 
             const g = new Graphics();
-            g.circle(0, 0, 7);
+            g.circle(0, 0, 14);
             g.fill({ color, alpha: 0.9 });
-            g.stroke({ width: 1.5, color: 0x2ee6ff, alpha: 0.9 });
+            g.stroke({ width: 2, color: 0x2ee6ff, alpha: 0.9 });
             g.x = p.x + offset.x;
-            g.y = p.y - 18 + offset.y;
+            g.y = p.y - 24 + offset.y;
             parent.addChild(g);
             return g;
         };
@@ -258,28 +273,20 @@ export default function PixiArmyLayer({
                 const isCombatDest =
                     combat &&
                     territory.countryId === combat.destinationCountryId;
-                const isCombatSrc =
-                    combat &&
-                    territory.countryId === combat.sourceCountryId;
                 const displayCount = isCombatDest
                     ? combat.defenderSoldiers
                     : territory.soldiers;
 
-                const face =
-                    isCombatSrc && centers[combat.destinationCountryId]
-                        ? centers[combat.destinationCountryId]
-                        : undefined;
-
-                // Idle soldiers on map; source garrison stays while attackers are mid-field.
+                // Idle soldiers share one facing; combatants aim via faceToward only.
                 if (!isCombatDest) {
                     makeSoldier(
                         layer,
                         ll,
                         territory.ownerFactionId,
                         { x: 0, y: 0 },
-                        combat && isCombatSrc ? "idle" : "idle",
-                        face,
-                        { loop: true, speed: 0.1, scale: 0.38 }
+                        "idle",
+                        undefined,
+                        { loop: true, speed: 0.1, scale: SCALE_IDLE }
                     );
                 }
 
@@ -291,7 +298,7 @@ export default function PixiArmyLayer({
                     ll,
                     displayCount,
                     owner?.color ?? "#333333",
-                    combat ? 22 : 38
+                    combat ? 52 : 64
                 );
             }
 
@@ -310,21 +317,21 @@ export default function PixiArmyLayer({
                         layer,
                         mid,
                         combat.attackerFactionId,
-                        { x: -14, y: -4 },
+                        { x: -22, y: -6 },
                         "shoot",
                         dstLl,
-                        { loop: true, speed: 0.32, scale: 0.46 }
+                        { loop: true, speed: 0.32, scale: SCALE_COMBAT }
                     );
                     makeSoldier(
                         layer,
                         mid,
                         combat.attackerFactionId,
-                        { x: 14, y: 8 },
+                        { x: 22, y: 10 },
                         "shoot",
                         dstLl,
-                        { loop: true, speed: 0.28, scale: 0.42 }
+                        { loop: true, speed: 0.28, scale: SCALE_COMBAT }
                     );
-                    placeBadge(layer, mid, combat.attackerSoldiers, atkColor, 42);
+                    placeBadge(layer, mid, combat.attackerSoldiers, atkColor, 72);
 
                     const defMid: [number, number] = [
                         srcLl[0] * 0.35 + dstLl[0] * 0.65,
@@ -337,7 +344,7 @@ export default function PixiArmyLayer({
                         { x: 0, y: 0 },
                         "shoot",
                         srcLl,
-                        { loop: true, speed: 0.26, scale: 0.44 }
+                        { loop: true, speed: 0.26, scale: SCALE_COMBAT }
                     );
                 }
             }
@@ -371,10 +378,10 @@ export default function PixiArmyLayer({
                         fx,
                         midB,
                         undefined,
-                        { x: 18, y: -8 },
+                        { x: 28, y: -10 },
                         "hit",
                         srcLl,
-                        { loop: false, speed: 0.35, scale: 0.4 }
+                        { loop: false, speed: 0.35, scale: SCALE_FX }
                     );
                 }
                 if ((item.attackerLosses ?? 0) > 0) {
@@ -382,10 +389,10 @@ export default function PixiArmyLayer({
                         fx,
                         midA,
                         undefined,
-                        { x: -18, y: 8 },
+                        { x: -28, y: 10 },
                         "hit",
                         dstLl,
-                        { loop: false, speed: 0.35, scale: 0.4 }
+                        { loop: false, speed: 0.35, scale: SCALE_FX }
                     );
                 }
             } else {
@@ -394,10 +401,10 @@ export default function PixiArmyLayer({
                     fx,
                     midA,
                     undefined,
-                    { x: 0, y: -16 },
+                    { x: 0, y: -24 },
                     "run",
                     dstLl,
-                    { loop: true, speed: 0.4, scale: 0.36 }
+                    { loop: true, speed: 0.4, scale: SCALE_FX }
                 );
             }
 

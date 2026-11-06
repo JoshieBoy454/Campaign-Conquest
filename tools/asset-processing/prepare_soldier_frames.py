@@ -19,14 +19,14 @@ TARGET_SIZE = 96
 BLACK_CUTOFF = 18  # near-black → transparent
 
 ANIMS: dict[str, dict] = {
-    # Gentle breathe / ready pose
-    "idle": {"folder": "hipFire", "step": 8, "max": 8},
+    # Gentle breathe / ready pose (art faces north / up)
+    "idle": {"folder": "hipFire", "step": 8, "max": 8, "rotate": 0},
     # March / attack approach
-    "run": {"folder": "run", "step": 4, "max": 13},
-    # Fire during combat rounds
-    "shoot": {"folder": "shoot", "step": 8, "max": 16},
-    # Casualties
-    "hit": {"folder": "hit", "step": 1, "max": 13},
+    "run": {"folder": "run", "step": 4, "max": 13, "rotate": 0},
+    # Fire — source frames face opposite; normalize to north
+    "shoot": {"folder": "shoot", "step": 8, "max": 16, "rotate": 180},
+    # Casualties — same facing fix as shoot
+    "hit": {"folder": "hit", "step": 1, "max": 13, "rotate": 180},
 }
 
 
@@ -71,6 +71,9 @@ def process_anim(name: str, cfg: dict) -> list[str]:
     for i, src in enumerate(picked):
         img = Image.open(src)
         img = make_transparent(img)
+        rotate = int(cfg.get("rotate", 0) or 0)
+        if rotate:
+            img = img.rotate(rotate, expand=False)
         img = img.resize((TARGET_SIZE, TARGET_SIZE), Image.Resampling.LANCZOS)
         dest = out_dir / f"{i:02d}.png"
         img.save(dest, optimize=True)
