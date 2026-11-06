@@ -21,7 +21,7 @@
 
             string filePath = Path.Combine(environment.ContentRootPath, "Data", "countries_population.csv");
 
-            _countries = LoadedCountries(filePath);
+            _countries = LoadCountries(filePath);
         }
 
         // -------------------------------------------------------------------------
@@ -52,6 +52,12 @@
 
             using TextFieldParser parser = new(filePath);
 
+            parser.TextFieldType = FieldType.Delimited;
+            parser.SetDelimiters(",");
+            parser.HasFieldsEnclosedInQuotes = true;
+            parser.TrimWhiteSpace = true;
+
+
             // Reads the first row with teh titiles
             string[] headers = parser.ReadFields() ?? throw new InvalidDataException(
                                                         "The CSV file is empty");
@@ -71,7 +77,7 @@
             }
 
             // Reads each row of country data
-            While (!parse.EndOfData) {
+            while (!parser.EndOfData) {
                 
                 string[] fields = parser.ReadFields() ?? throw new InvalidDataException(
                                                             "Could not read the CSV rows");
@@ -79,13 +85,12 @@
                 // if the country code is more than 3 throws an exception
                 if (fields.Length != 3) {
                     throw new InvalidDataException(
-                        $"Invalid CSV row on line {parser.LineNumber}"
-                    );
+                        $"Invalid CSV row on line {parser.LineNumber}");
                 }
 
                 string countryId = fields[0].Trim().ToUpperInvariant();
                 string countryName = fields[1].Trim();
-                string populationText = fields[2].trim();
+                string populationText = fields[2].Trim();
 
                 // checks if country ids match the code format
                 if (countryId.Length != 3 || !countryId.All(c => c >= 'A' && c <= 'Z')) {
@@ -111,7 +116,7 @@
                         $"Duplicate country ID: {countryId}");
                 }
 
-                countries.Add(new CountryDefinition(couuntryId, countryName, population));
+                countries.Add(new CountryDefinition(countryId, countryName, population));
             }
 
             // ensures atleast 10 countries are present for the game

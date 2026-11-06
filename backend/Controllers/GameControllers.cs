@@ -9,7 +9,7 @@ namespace Controllers;
     // Record: CreateGameRequest
     // Represetns the info sent by the front end to create a new game
     // -----------------------------------------------------------------------------
-    public record CreateGameRequest(string SelectedCountryid);
+    public record CreateGameRequest(string SelectedCountryId);
 
     // -----------------------------------------------------------------------------
     // Class: GamesController
@@ -77,7 +77,7 @@ namespace Controllers;
             }
 
             // Create the factions, territories and D20 turn order
-            GameInitializationResult result = _initializationService.CreateGame(request.SelectedCountryId, countries)
+            GameInitializationResult result = _initializationService.CreateGame(request.SelectedCountryId, countries);
 
             // Save the game temporarily in memory
             _gameStore.AddGame(result.Game);
