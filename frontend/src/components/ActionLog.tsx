@@ -20,8 +20,32 @@ const FRIENDLY: Record<string, string> = {
     RetreatCombat: "Attacker retreated",
     SetNpcSpeed: "Pacing changed",
     NpcTurn: "NPC completed a turn",
+    NpcCombatRound: "NPC combat round",
     CommentaryAvailable: "Battle commentary",
 };
+
+function detailFor(event: GameEventRow): string | null {
+    if (!event.payloadJson) return null;
+    try {
+        const payload = JSON.parse(event.payloadJson) as Record<string, unknown>;
+        if (event.type === "NpcCombatRound") {
+            const src = String(payload.sourceCountryId ?? "?");
+            const dst = String(payload.destinationCountryId ?? "?");
+            const aLoss = Number(payload.attackerLosses ?? 0);
+            const dLoss = Number(payload.defenderLosses ?? 0);
+            return `${src} → ${dst} (−${aLoss}/−${dLoss})`;
+        }
+        if (event.type === "NpcTurn") {
+            return String(payload.factionName ?? "");
+        }
+        if (event.type === "CommentaryAvailable") {
+            return String(payload.commentary ?? "").slice(0, 80);
+        }
+    } catch {
+        return null;
+    }
+    return null;
+}
 
 export default function ActionLog({ gameId }: Props) {
     const [events, setEvents] = useState<GameEventRow[]>([]);
@@ -80,6 +104,14 @@ export default function ActionLog({ gameId }: Props) {
                     <div style={{ fontWeight: 600 }}>
                         {FRIENDLY[event.type] ?? event.type}
                     </div>
+                    {(() => {
+                        const detail = detailFor(event);
+                        return detail ? (
+                            <div className="holo-muted" style={{ fontSize: 11 }}>
+                                {detail}
+                            </div>
+                        ) : null;
+                    })()}
                     <div className="holo-muted" style={{ fontSize: 11 }}>
                         {new Date(event.occurredAtUtc).toLocaleTimeString()}
                     </div>

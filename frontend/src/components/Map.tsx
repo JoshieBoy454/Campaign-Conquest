@@ -35,6 +35,7 @@ import {
     registerTerrainImages,
     setParticipation,
 } from "../map/setupCountryLayers";
+import { presentationQueue } from "../services/presentationQueue";
 import type { CountryDefinition, GameState } from "../types/game";
 import { FactionType, TurnPhase } from "../types/game";
 
@@ -209,9 +210,14 @@ export default function Map({
         map.current = currentMap;
 
         currentMap.on("load", () => {
+            // Panable empty style + menu immediately; patterns/geo load after.
+            setMapReady(true);
+
             void (async () => {
                 try {
+                    // After menu is visible — register tiles then countries (fill-pattern needs images).
                     await registerTerrainImages(currentMap);
+
                     const isos =
                         catalogueIsosRef.current.size > 0
                             ? catalogueIsosRef.current
@@ -221,7 +227,9 @@ export default function Map({
                     const { collection } = await loadCountryGeoJson(isos);
                     geoRef.current = collection;
                     addCountryLayers(currentMap, collection);
+                    setCountriesGeometryReady(true);
 
+                    // Centers from the same parse (no second GeoJSON fetch).
                     const centers: Record<string, LngLatPair> = {};
                     for (const feature of collection.features) {
                         const countryId = String(
@@ -247,8 +255,6 @@ export default function Map({
                     }
                     countryCentersRef.current = centers;
                     setCountryCentersReady(true);
-                    setCountriesGeometryReady(true);
-                    setMapReady(true);
                 } catch (err) {
                     setError(
                         err instanceof Error
@@ -449,6 +455,78 @@ export default function Map({
             .then(mergeGame)
             .catch(() => undefined);
     }, [presentationSpeed, game?.currentFactionId, game?.id, isHost]);
+
+    // NPC combat rounds finish server-side — drive Pixi from event stream
+    useEffect(() => {
+        if (!game) return;
+        presentationQueue.reset();
+        let cancelled = false;
+        let after = 0;
+
+        async function pull() {
+            try {
+                const response = await fetch(
+                    apiUrl(
+                        `/api/games/${encodeURIComponent(game!.id)}/events?afterSequence=${after}&limit=100`
+                    ),
+                    { credentials: "include" }
+                );
+                if (!response.ok || cancelled) return;
+                const rows = (await response.json()) as Array<{
+                    eventId: string;
+                    sequence?: number;
+                    type: string;
+                    payloadJson?: string;
+                }>;
+                for (const row of rows) {
+                    after = Math.max(after, row.sequence ?? after);
+                    if (row.type !== "NpcCombatRound" || !row.payloadJson) continue;
+                    try {
+                        const payload = JSON.parse(row.payloadJson) as {
+                            sourceCountryId?: string;
+                            destinationCountryId?: string;
+                            attackerLosses?: number;
+                            defenderLosses?: number;
+                        };
+                        presentationQueue.enqueue({
+                            id: row.eventId,
+                            kind: "combat-round",
+                            sourceCountryId: payload.sourceCountryId,
+                            destinationCountryId: payload.destinationCountryId,
+                            attackerLosses: payload.attackerLosses,
+                            defenderLosses: payload.defenderLosses,
+                            speed: presentationSpeed,
+                        });
+                        if (
+                            (payload.attackerLosses ?? 0) > 0 ||
+                            (payload.defenderLosses ?? 0) > 0
+                        ) {
+                            presentationQueue.enqueue({
+                                id: `${row.eventId}-cas`,
+                                kind: "casualty",
+                                sourceCountryId: payload.sourceCountryId,
+                                destinationCountryId: payload.destinationCountryId,
+                                attackerLosses: payload.attackerLosses,
+                                defenderLosses: payload.defenderLosses,
+                                speed: presentationSpeed,
+                            });
+                        }
+                    } catch {
+                        /* ignore bad payload */
+                    }
+                }
+            } catch {
+                /* ignore */
+            }
+        }
+
+        void pull();
+        const handle = window.setInterval(() => void pull(), 2000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(handle);
+        };
+    }, [game?.id, presentationSpeed]);
 
     function flyToCountry(countryId: string, countryName: string) {
         const currentMap = map.current;
@@ -834,6 +912,7 @@ export default function Map({
                 territories={game?.territories ?? []}
                 factions={game?.factions ?? []}
                 combat={game?.activeCombat ?? null}
+                presentationSpeed={presentationSpeed}
             />
 
             {game && (

@@ -7,25 +7,38 @@ using Repositories;
 
 namespace Services;
 
+public sealed record NpcCombatRoundSnapshot(
+    string SourceCountryId,
+    string DestinationCountryId,
+    int[] AttackerDice,
+    int[] DefenderDice,
+    int AttackerLosses,
+    int DefenderLosses,
+    bool BattleFinished);
+
+public sealed record NpcTurnResult(IReadOnlyList<NpcCombatRoundSnapshot> CombatRounds);
+
 // ---- Simple NPC heuristics (no LLM yet) ----
 public interface INpcDecisionPolicy {
-    void PlayTurn(GameState game, Guid npcFactionId, TurnService turnService, CombatService combatService);
+    NpcTurnResult PlayTurn(GameState game, Guid npcFactionId, TurnService turnService, CombatService combatService);
 }
 
 public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
 
     private const int MaxPhaseSteps = 20;
 
-    public void PlayTurn(GameState game, Guid npcFactionId, TurnService turnService, CombatService combatService) {
+    public NpcTurnResult PlayTurn(GameState game, Guid npcFactionId, TurnService turnService, CombatService combatService) {
+
+        List<NpcCombatRoundSnapshot> combatRounds = [];
 
         if (game.CurrentFactionId != npcFactionId) {
-            return;
+            return new NpcTurnResult(combatRounds);
         }
 
         Faction npc = game.Factions.Single(f => f.Id == npcFactionId);
 
         if (npc.Type != FactionType.NPC || npc.IsDefeated) {
-            return;
+            return new NpcTurnResult(combatRounds);
         }
 
         int steps = 0;
@@ -53,7 +66,8 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
                         TryCombatOrSkip(game, npcFactionId, combatService);
 
                         if (game.ActiveCombat != null) {
-                            ResolveCombatUntilDone(game, npcFactionId, combatService);
+                            combatRounds.AddRange(
+                                ResolveCombatUntilDone(game, npcFactionId, combatService));
                         }
 
                         // Retreat / fail leave phase on Combat — force advance
@@ -71,7 +85,7 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
                         break;
 
                     default:
-                        return;
+                        return new NpcTurnResult(combatRounds);
                 }
             }
             catch (InvalidOperationException) {
@@ -85,14 +99,16 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
                         combatService.SkipCombat(game, npcFactionId);
                     }
                     catch (InvalidOperationException) {
-                        return;
+                        return new NpcTurnResult(combatRounds);
                     }
                 }
                 else {
-                    return;
+                    return new NpcTurnResult(combatRounds);
                 }
             }
         }
+
+        return new NpcTurnResult(combatRounds);
     }
 
     private static void SpendReinforcementPool(GameState game, Guid factionId, TurnService turnService) {
@@ -151,8 +167,12 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
         }
     }
 
-    private static void ResolveCombatUntilDone(GameState game, Guid factionId, CombatService combatService) {
+    private static List<NpcCombatRoundSnapshot> ResolveCombatUntilDone(
+        GameState game,
+        Guid factionId,
+        CombatService combatService) {
 
+        List<NpcCombatRoundSnapshot> rounds = [];
         int safety = 64;
 
         while (game.ActiveCombat != null && safety-- > 0) {
@@ -164,8 +184,22 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
                 break;
             }
 
+            string source = combat.SourceCountryId;
+            string destination = combat.DestinationCountryId;
             combatService.ResolveNextRound(game, factionId);
+
+            // ResolveNextRound mutates this object before clearing ActiveCombat
+            rounds.Add(new NpcCombatRoundSnapshot(
+                source,
+                destination,
+                combat.LastAttackerDice.ToArray(),
+                combat.LastDefenderDice.ToArray(),
+                combat.LastAttackerLosses,
+                combat.LastDefenderLosses,
+                game.ActiveCombat == null));
         }
+
+        return rounds;
     }
 
     private static bool IsDefeatedOwner(GameState game, Guid ownerId) {
@@ -263,7 +297,7 @@ public class NpcTurnHostedService : BackgroundService {
         long versionAtStart = game.Version;
         string npcName = game.Factions.FirstOrDefault(f => f.Id == npcFactionId)?.Name ?? "NPC";
 
-        policy.PlayTurn(game, npcFactionId, turnService, combatService);
+        NpcTurnResult turnResult = policy.PlayTurn(game, npcFactionId, turnService, combatService);
 
         if (game.Version > versionAtStart) {
             bool saved = await _gameRepository.TryReplaceAsync(game, versionAtStart, stoppingToken);
@@ -279,16 +313,84 @@ public class NpcTurnHostedService : BackgroundService {
                         factionName = npcName,
                         version = game.Version,
                         phase = game.CurrentPhase.ToString(),
+                        combatRounds = turnResult.CombatRounds.Count,
                     }),
                 }, stoppingToken);
 
+                foreach (NpcCombatRoundSnapshot round in turnResult.CombatRounds) {
+                    await _gameEventRepository.AppendAsync(new GameEvent {
+                        GameId = gameId,
+                        EventId = Guid.NewGuid().ToString("N"),
+                        Type = "NpcCombatRound",
+                        OccurredAtUtc = DateTime.UtcNow,
+                        PayloadJson = JsonSerializer.Serialize(new {
+                            factionId = npcFactionId,
+                            factionName = npcName,
+                            sourceCountryId = round.SourceCountryId,
+                            destinationCountryId = round.DestinationCountryId,
+                            attackerDice = round.AttackerDice,
+                            defenderDice = round.DefenderDice,
+                            attackerLosses = round.AttackerLosses,
+                            defenderLosses = round.DefenderLosses,
+                            battleFinished = round.BattleFinished,
+                        }),
+                    }, stoppingToken);
+                }
+
                 await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, stoppingToken);
+
+                QueueNpcCommentary(gameId, turnResult.CombatRounds);
             }
         }
 
         if (game.CurrentFactionId != startingFaction || game.CurrentPhase != startingPhase || game.ActiveCombat != null) {
             await Task.Delay(delay, stoppingToken);
         }
+    }
+
+    private void QueueNpcCommentary(Guid gameId, IReadOnlyList<NpcCombatRoundSnapshot> rounds) {
+        NpcCombatRoundSnapshot? last = rounds.LastOrDefault();
+        if (last == null) {
+            return;
+        }
+
+        _ = Task.Run(async () => {
+            try {
+                await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+                ICombatCommentaryService commentary =
+                    scope.ServiceProvider.GetRequiredService<ICombatCommentaryService>();
+                IGameEventRepository events =
+                    scope.ServiceProvider.GetRequiredService<IGameEventRepository>();
+
+                string? text = await commentary.GenerateAsync(
+                    new CombatCommentaryContext {
+                        AttackerCountry = last.SourceCountryId,
+                        DefenderCountry = last.DestinationCountryId,
+                        Round = Math.Max(1, last.AttackerDice.Length),
+                        AttackerDice = last.AttackerDice,
+                        DefenderDice = last.DefenderDice,
+                        AttackerCasualties = last.AttackerLosses,
+                        DefenderCasualties = last.DefenderLosses,
+                        BattleFinished = last.BattleFinished,
+                    },
+                    CancellationToken.None);
+
+                if (string.IsNullOrWhiteSpace(text)) {
+                    return;
+                }
+
+                await events.AppendAsync(new GameEvent {
+                    GameId = gameId,
+                    EventId = Guid.NewGuid().ToString("N"),
+                    Type = "CommentaryAvailable",
+                    OccurredAtUtc = DateTime.UtcNow,
+                    PayloadJson = JsonSerializer.Serialize(new { commentary = text }),
+                }, CancellationToken.None);
+            }
+            catch {
+                // commentary is best-effort
+            }
+        });
     }
 }
 
