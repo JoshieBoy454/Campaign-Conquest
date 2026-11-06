@@ -8,7 +8,6 @@ type Props = {
     battleDestName?: string;
     onAdvance: () => void;
     onAllocate: () => void;
-    onSkipCombat: () => void;
     onRollCombat: () => void;
     onRetreat: () => void;
     onAttackSelected: () => void;
@@ -30,7 +29,6 @@ export default function PhaseControls({
     battleDestName,
     onAdvance,
     onAllocate,
-    onSkipCombat,
     onRollCombat,
     onRetreat,
     onAttackSelected,
@@ -127,24 +125,14 @@ export default function PhaseControls({
                             )}
 
                         {game.currentPhase === TurnPhase.Combat && !combatActive && (
-                            <>
-                                <button
-                                    type="button"
-                                    className="holo-btn holo-btn-primary"
-                                    disabled={busy || !canAttackSelected}
-                                    onClick={onAttackSelected}
-                                >
-                                    Attack selected
-                                </button>
-                                <button
-                                    type="button"
-                                    className="holo-btn"
-                                    disabled={busy}
-                                    onClick={onSkipCombat}
-                                >
-                                    Skip combat
-                                </button>
-                            </>
+                            <button
+                                type="button"
+                                className="holo-btn holo-btn-primary"
+                                disabled={busy || !canAttackSelected}
+                                onClick={onAttackSelected}
+                            >
+                                Attack selected
+                            </button>
                         )}
 
                         {game.currentPhase === TurnPhase.Combat && combatActive && (

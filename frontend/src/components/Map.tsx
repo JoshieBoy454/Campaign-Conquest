@@ -1011,11 +1011,6 @@ export default function Map({
                                 )
                             );
                         }}
-                        onSkipCombat={() =>
-                            void runGameAction(() =>
-                                advancePhase(game.id, game.version)
-                            )
-                        }
                         onRollCombat={() =>
                             void runGameAction(() =>
                                 rollCombat(game.id, game.version)
