@@ -10,16 +10,22 @@ export type GameEventRow = {
 
 /** Normalize ASP.NET camelCase or PascalCase event payloads. */
 export function normalizeEvent(raw: Record<string, unknown>): GameEventRow | null {
-    const eventId = String(raw.eventId ?? raw.EventId ?? "");
-    if (!eventId) return null;
     const sequence = Number(raw.sequence ?? raw.Sequence ?? 0);
+    const type = String(raw.type ?? raw.Type ?? "").trim();
+    const occurredAtUtc = String(
+        raw.occurredAtUtc ?? raw.OccurredAtUtc ?? new Date().toISOString()
+    );
+    // Never drop rows for a missing EventId — synthesize a stable key.
+    let eventId = String(raw.eventId ?? raw.EventId ?? "").trim();
+    if (!eventId) {
+        if (!type && !Number.isFinite(sequence)) return null;
+        eventId = `seq-${Number.isFinite(sequence) ? sequence : 0}-${type || "event"}-${occurredAtUtc}`;
+    }
     return {
         eventId,
         sequence: Number.isFinite(sequence) ? sequence : 0,
-        type: String(raw.type ?? raw.Type ?? ""),
-        occurredAtUtc: String(
-            raw.occurredAtUtc ?? raw.OccurredAtUtc ?? new Date().toISOString()
-        ),
+        type: type || "Unknown",
+        occurredAtUtc,
         payloadJson:
             raw.payloadJson != null
                 ? String(raw.payloadJson)

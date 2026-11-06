@@ -491,7 +491,13 @@ export default function Map({
                             : raw.PayloadJson != null
                               ? String(raw.PayloadJson)
                               : "";
-                    if (type !== "NpcCombatRound" || !payloadJson) continue;
+                    if (
+                        (type !== "NpcCombatRound" &&
+                            type !== "ResolveCombatRound") ||
+                        !payloadJson
+                    ) {
+                        continue;
+                    }
                     const row = { eventId, payloadJson };
                     try {
                         const payload = JSON.parse(row.payloadJson) as {

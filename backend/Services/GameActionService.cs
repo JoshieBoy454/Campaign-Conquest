@@ -391,8 +391,9 @@ public class GameActionService {
                 object? extra = payloadFactory?.Invoke(game);
                 await AppendEventAsync(gameId, actionId, eventType, game, extra, cancellationToken);
             }
-            catch {
-                // best-effort
+            catch (Exception ex) {
+                System.Diagnostics.Debug.WriteLine(
+                    $"AppendEventAsync failed for {eventType} game {gameId}: {ex.Message}");
             }
 
             try {

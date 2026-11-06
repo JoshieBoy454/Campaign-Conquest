@@ -35,16 +35,12 @@ public class MongoGameEventRepository : IGameEventRepository
     public async Task AppendAsync(GameEvent gameEvent, CancellationToken cancellationToken = default)
     {
         // Sequence is unique per game — retry on races with NPC/commentary writers.
+        // Resolve next sequence via raw BSON so legacy Guid encodings still count.
         const int maxAttempts = 8;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            GameEvent? latest = await _events
-                .Find(e => e.GameId == gameEvent.GameId)
-                .SortByDescending(e => e.Sequence)
-                .Limit(1)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            gameEvent.Sequence = latest == null ? 1 : latest.Sequence + 1;
+            long nextSequence = await PeekNextSequenceAsync(gameEvent.GameId, cancellationToken);
+            gameEvent.Sequence = nextSequence;
 
             try
             {
@@ -68,8 +64,19 @@ public class MongoGameEventRepository : IGameEventRepository
         int pageSize = 100,
         CancellationToken cancellationToken = default)
     {
+        // Prefer raw BSON path so Guid/string GameId variants and odd docs still surface.
         try
         {
+            IReadOnlyList<GameEvent> raw = await GetAfterRawAsync(
+                gameId,
+                afterSequence,
+                pageSize,
+                cancellationToken);
+            if (raw.Count > 0) {
+                return raw;
+            }
+
+            // Empty raw may still mean typed-only docs — try typed as well.
             return await _events
                 .Find(e => e.GameId == gameId && e.Sequence > afterSequence)
                 .SortBy(e => e.Sequence)
@@ -80,10 +87,47 @@ public class MongoGameEventRepository : IGameEventRepository
         {
             _logger.LogWarning(
                 ex,
-                "Typed GameEvents read failed for {GameId}; falling back to raw BSON map",
+                "GameEvents read failed for {GameId}; retrying typed collection",
                 gameId);
-            return await GetAfterRawAsync(gameId, afterSequence, pageSize, cancellationToken);
+            try {
+                return await _events
+                    .Find(e => e.GameId == gameId && e.Sequence > afterSequence)
+                    .SortBy(e => e.Sequence)
+                    .Limit(pageSize)
+                    .ToListAsync(cancellationToken);
+            }
+            catch (Exception typedEx) {
+                _logger.LogError(typedEx, "Typed GameEvents read also failed for {GameId}", gameId);
+                return [];
+            }
         }
+    }
+
+    private async Task<long> PeekNextSequenceAsync(Guid gameId, CancellationToken cancellationToken)
+    {
+        FilterDefinition<BsonDocument> gameFilter = Builders<BsonDocument>.Filter.Or(
+            Builders<BsonDocument>.Filter.Eq("GameId", gameId),
+            Builders<BsonDocument>.Filter.Eq("GameId", gameId.ToString()),
+            Builders<BsonDocument>.Filter.Eq("gameId", gameId),
+            Builders<BsonDocument>.Filter.Eq("gameId", gameId.ToString()));
+
+        BsonDocument? latest = await _rawEvents
+            .Find(gameFilter)
+            .Sort(Builders<BsonDocument>.Sort.Descending("Sequence").Descending("sequence"))
+            .Limit(1)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (latest == null) {
+            return 1;
+        }
+
+        long sequence = 0;
+        if (latest.TryGetValue("Sequence", out BsonValue seq) ||
+            latest.TryGetValue("sequence", out seq)) {
+            sequence = seq.ToInt64();
+        }
+
+        return sequence + 1;
     }
 
     private async Task<IReadOnlyList<GameEvent>> GetAfterRawAsync(

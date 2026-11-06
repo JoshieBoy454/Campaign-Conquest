@@ -13,6 +13,7 @@ const FRIENDLY: Record<string, string> = {
     StartCombat: "Battle started",
     ResolveCombatRound: "Combat round",
     RetreatCombat: "Attacker retreated",
+    SkipCombat: "Combat skipped",
     SetNpcSpeed: "Pacing changed",
     NpcTurn: "NPC turn",
     NpcCombatRound: "NPC combat",
@@ -127,9 +128,15 @@ function detailFor(event: GameEventRow): string | null {
         }
 
         if (event.type === "AdvancePhase") {
-            return [str(p.factionName, ""), str(p.phase, "")]
+            return [str(p.factionName, ""), str(p.phase, ""), p.actor === "NPC" ? "NPC" : null]
                 .filter(Boolean)
                 .join(" · ");
+        }
+
+        if (event.type === "SkipCombat") {
+            const who = str(p.factionName, p.actor === "NPC" ? "NPC" : "?");
+            const reason = p.reason != null ? str(p.reason) : null;
+            return [who, reason].filter(Boolean).join(" · ");
         }
 
         if (event.type === "NpcTurn") {
@@ -184,7 +191,9 @@ export default function ActionLog({ gameId }: Props) {
                 const incoming = rows.filter(
                     (r) =>
                         !seen.has(r.eventId) &&
-                        r.type !== "CommentaryAvailable"
+                        r.type !== "CommentaryAvailable" &&
+                        // Map VFX twin of ResolveCombatRound — keep log unduplicated.
+                        r.type !== "NpcCombatRound"
                 );
                 // Newest first: prepend higher sequences
                 const merged = [...incoming.reverse(), ...prev];
