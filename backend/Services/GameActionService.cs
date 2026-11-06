@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Enums;
 using Models;
 using Repositories;
 
@@ -194,11 +195,12 @@ public class GameActionService {
             actionId,
             "ResolveCombatRound",
             state => {
-                Guid actorId = RequireCurrentFaction(state);
-                CombatState? before = state.ActiveCombat;
-                sourceName = TerritoryName(state, before?.SourceCountryId);
-                destinationName = TerritoryName(state, before?.DestinationCountryId);
-                roundSnapshot = _combatService.ResolveNextRound(state, actorId);
+                CombatState? before = state.ActiveCombat
+                    ?? throw new InvalidOperationException("There is no active combat");
+                sourceName = TerritoryName(state, before.SourceCountryId);
+                destinationName = TerritoryName(state, before.DestinationCountryId);
+                Guid rollerId = ResolveCombatRoller(state, before);
+                roundSnapshot = _combatService.ResolveNextRound(state, rollerId);
             },
             cancellationToken,
             _ => roundSnapshot == null
@@ -467,6 +469,30 @@ public class GameActionService {
         };
 
         await _gameEventRepository.AppendAsync(gameEvent, cancellationToken);
+    }
+
+    /// <summary>
+    /// Human always rolls when they are in the fight (attacker on their turn, or defender under assault).
+    /// </summary>
+    private static Guid ResolveCombatRoller(GameState game, CombatState combat) {
+
+        Faction? human = game.Factions.FirstOrDefault(f =>
+            f.Type == FactionType.Human && !f.IsDefeated);
+
+        if (human != null && combat.DefenderFactionId == human.Id) {
+            return human.Id;
+        }
+
+        if (human != null && combat.AttackerFactionId == human.Id) {
+            Guid current = RequireCurrentFaction(game);
+            if (current != human.Id) {
+                throw new InvalidOperationException("It is not your turn to attack");
+            }
+
+            return human.Id;
+        }
+
+        return RequireCurrentFaction(game);
     }
 
     private static Guid RequireCurrentFaction(GameState game) {

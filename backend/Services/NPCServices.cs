@@ -86,6 +86,11 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
 
                 case TurnPhase.Combat:
                     if (game.ActiveCombat != null) {
+                        // Pause for the human defender — they roll dice from the client.
+                        if (IsHumanFaction(game, game.ActiveCombat.DefenderFactionId)) {
+                            break;
+                        }
+
                         ResolveOneCombatStep(game, npcFactionId, npcName, combatService, events);
                         // Engagement finished this step — leave Combat so we do not start a second fight.
                         if (
@@ -103,7 +108,11 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
                             }));
                         }
                     }
-                    else if (game.ConqueredThisTurn.Count > 0) {
+                    else if (
+                        game.ConqueredThisTurn.Count > 0
+                        || (game.LastResolvedCombat != null
+                            && game.LastResolvedCombat.AttackerFactionId == npcFactionId)) {
+                        // Already fought (including a paused assault the human just finished).
                         combatService.SkipCombat(game, npcFactionId);
                         events.Add(new NpcLoggedEvent("SkipCombat", new {
                             factionId = npcFactionId,
@@ -340,6 +349,12 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
         Faction? owner = game.Factions.FirstOrDefault(f => f.Id == ownerId);
         return owner == null || owner.IsDefeated;
     }
+
+    private static bool IsHumanFaction(GameState game, Guid factionId) {
+
+        Faction? faction = game.Factions.FirstOrDefault(f => f.Id == factionId);
+        return faction is { Type: FactionType.Human, IsDefeated: false };
+    }
 }
 
 // ---- Background loop: one NPC step at a time, delay outside the game lock ----
@@ -389,6 +404,16 @@ public class NpcTurnHostedService : BackgroundService {
                 Faction? current = snapshot.Factions.FirstOrDefault(f => f.Id == snapshot.CurrentFactionId);
 
                 if (current == null || current.Type != FactionType.NPC || current.IsDefeated) {
+                    continue;
+                }
+
+                // Human is defending — leave ActiveCombat alone until they roll.
+                if (
+                    snapshot.ActiveCombat != null
+                    && snapshot.Factions.Any(f =>
+                        f.Id == snapshot.ActiveCombat.DefenderFactionId
+                        && f.Type == FactionType.Human
+                        && !f.IsDefeated)) {
                     continue;
                 }
 

@@ -453,20 +453,14 @@ export default function Map({
         }
     }, [game, mapReady]);
 
-    // Presentation speed → NPC API (soft-retry once on version conflict)
+    // Keep preferred 1×/2×; push to API whenever it differs (applies on NPC steps).
     useEffect(() => {
         if (!game || !isHost) return;
-        const humanTurn =
-            game.factions.find((f) => f.id === game.currentFactionId)?.type ===
-            FactionType.Human;
-        if (humanTurn && presentationSpeed !== 1) {
-            setPresentationSpeed(1);
-            return;
-        }
-        const desired = humanTurn ? 1 : presentationSpeed;
+        const desired = presentationSpeed;
         if ((game.npcSpeed ?? 1) === desired) return;
         const gameId = game.id;
-        void setNpcSpeed(gameId, game.version, desired)
+        const expectedVersion = game.version;
+        void setNpcSpeed(gameId, expectedVersion, desired)
             .then(mergeGame)
             .catch(async () => {
                 try {

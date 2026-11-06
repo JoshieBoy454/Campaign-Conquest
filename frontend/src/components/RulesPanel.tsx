@@ -68,9 +68,10 @@ export default function RulesPanel({ onClose }: Props) {
                         <p>
                             <strong>Combat</strong> — Left-click your attacking country (2+
                             soldiers), then right-click an enemy. Confirm the commit (one stays
-                            home). Commit 3+ attackers to roll 3 dice (2→2 dice, 1→1); defenders
-                            roll up to 2. Your dice sit on the bottom row. Roll rounds or
-                            retreat; losses come from the server dice.
+                            home).                             Commit 3+ attackers to roll 3 dice (2→2 dice, 1→1); defenders
+                            roll up to 2. Your dice sit on the bottom row. When an NPC
+                            attacks you, the combat panel opens and you roll defense.
+                            Roll rounds or retreat; losses come from the server dice.
                         </p>
                         <p>
                             <strong>Spectator</strong> — Open a game via the spectator link or
@@ -78,8 +79,8 @@ export default function RulesPanel({ onClose }: Props) {
                             speed.
                         </p>
                         <p style={{ marginBottom: 0 }}>
-                            <strong>1× / 2×</strong> — Speeds NPC turns and presentation only.
-                            Your own turn always runs at Normal (1×).
+                            <strong>1× / 2×</strong> — Sets how fast NPC turns advance
+                            (2× is half the wait between NPC steps).
                         </p>
                     </div>
                 </div>

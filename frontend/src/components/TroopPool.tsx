@@ -1,4 +1,4 @@
-import { FactionType, type GameState } from "../types/game";
+import type { GameState } from "../types/game";
 
 type Props = {
     game: GameState;
@@ -13,9 +13,6 @@ export default function TroopPool({
     onSpeedChange,
     children,
 }: Props) {
-    const current = game.factions.find((f) => f.id === game.currentFactionId);
-    const isHuman = current?.type === FactionType.Human;
-
     return (
         <div
             style={{
@@ -63,12 +60,7 @@ export default function TroopPool({
                                         : undefined,
                             }}
                             onClick={() => onSpeedChange(2)}
-                            disabled={isHuman}
-                            title={
-                                isHuman
-                                    ? "2× only during NPC turns"
-                                    : "Accelerate NPC presentation"
-                            }
+                            title="Double NPC turn / presentation speed"
                         >
                             2×
                         </button>

@@ -112,14 +112,28 @@ public class CombatService {
     /// </summary>
     public CombatState ResolveNextRound(GameState game, Guid factionId) {
 
-        TurnService.RequireActiveFaction(game, factionId);
-
         CombatState combat = RequireActiveCombat(game);
 
-        if (combat.AttackerFactionId != factionId) {
+        Faction faction = game.Factions.FirstOrDefault(f => f.Id == factionId)
+            ?? throw new InvalidOperationException("Unknown faction");
+
+        bool isAttacker = combat.AttackerFactionId == factionId;
+        bool isHumanDefender =
+            combat.DefenderFactionId == factionId
+            && faction.Type == FactionType.Human;
+
+        if (!isAttacker && !isHumanDefender) {
             throw new InvalidOperationException(
-                "Only the attacker can roll combat dice"
+                "Only the attacker, or the defending player, can roll combat dice"
             );
+        }
+
+        // Attacker must own the turn; defending player may roll during an NPC assault.
+        if (isAttacker) {
+            TurnService.RequireActiveFaction(game, factionId);
+        }
+        else if (game.Status != GameStatus.InProgress) {
+            throw new InvalidOperationException("The game is not in progress");
         }
 
         combat.RoundNumber += 1;

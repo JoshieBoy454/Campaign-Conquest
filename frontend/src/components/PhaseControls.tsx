@@ -56,8 +56,22 @@ export default function PhaseControls({
     onRetreat,
 }: Props) {
     const current = game.factions.find((f) => f.id === game.currentFactionId);
+    const human = game.factions.find((f) => f.type === FactionType.Human);
     const isHumanTurn = current?.type === FactionType.Human;
     const combatActive = Boolean(game.activeCombat);
+    const defending =
+        Boolean(
+            combatActive &&
+                human &&
+                game.activeCombat?.defenderFactionId === human.id
+        );
+    const attackingAsHuman =
+        Boolean(
+            combatActive &&
+                human &&
+                game.activeCombat?.attackerFactionId === human.id
+        );
+    const canRollCombat = attackingAsHuman || defending;
     const phaseLabel = PHASE_LABELS[game.currentPhase] ?? "—";
     const reinforcing =
         game.currentPhase === TurnPhase.ReinforcementOne ||
@@ -123,9 +137,11 @@ export default function PhaseControls({
                 </div>
 
                 <strong>
-                    {isHumanTurn
-                        ? `Your turn — ${phaseLabel}`
-                        : `${current?.name ?? "NPC"} — ${phaseLabel}`}
+                    {defending
+                        ? "Under attack — roll to defend"
+                        : isHumanTurn
+                          ? `Your turn — ${phaseLabel}`
+                          : `${current?.name ?? "NPC"} — ${phaseLabel}`}
                 </strong>
                 {combatActive && (
                     <div className="holo-muted" style={{ marginTop: 4 }}>
@@ -172,9 +188,9 @@ export default function PhaseControls({
                     </div>
                 )}
 
-                {isHumanTurn && (
+                {(isHumanTurn || defending) && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                        {pendingCommit && (
+                        {isHumanTurn && pendingCommit && (
                             <>
                                 <button
                                     type="button"
@@ -195,7 +211,8 @@ export default function PhaseControls({
                             </>
                         )}
 
-                        {!pendingCommit &&
+                        {isHumanTurn &&
+                            !pendingCommit &&
                             (game.currentPhase === TurnPhase.Upkeep ||
                                 game.currentPhase === TurnPhase.EndTurn ||
                                 (game.currentPhase === TurnPhase.ReinforcementOne &&
@@ -218,7 +235,8 @@ export default function PhaseControls({
                                 </button>
                             )}
 
-                        {!pendingCommit &&
+                        {isHumanTurn &&
+                            !pendingCommit &&
                             reinforcing &&
                             game.reinforcementPool > 0 && (
                                 <button
@@ -232,7 +250,7 @@ export default function PhaseControls({
                                 </button>
                             )}
 
-                        {game.currentPhase === TurnPhase.Combat && combatActive && (
+                        {canRollCombat && (
                             <>
                                 <button
                                     type="button"
@@ -240,16 +258,18 @@ export default function PhaseControls({
                                     disabled={busy}
                                     onClick={onRollCombat}
                                 >
-                                    Roll dice
+                                    {defending ? "Roll defense" : "Roll dice"}
                                 </button>
-                                <button
-                                    type="button"
-                                    className="holo-btn"
-                                    disabled={busy}
-                                    onClick={onRetreat}
-                                >
-                                    Retreat
-                                </button>
+                                {attackingAsHuman && (
+                                    <button
+                                        type="button"
+                                        className="holo-btn"
+                                        disabled={busy}
+                                        onClick={onRetreat}
+                                    >
+                                        Retreat
+                                    </button>
+                                )}
                             </>
                         )}
                     </div>

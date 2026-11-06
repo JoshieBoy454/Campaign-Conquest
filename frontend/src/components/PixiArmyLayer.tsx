@@ -109,7 +109,7 @@ export default function PixiArmyLayer({
     territories,
     factions,
     combat,
-    presentationSpeed = 1,
+    presentationSpeed: _presentationSpeed = 1,
 }: Props) {
     const hostRef = useRef<HTMLDivElement>(null);
     const appRef = useRef<Application | null>(null);
@@ -117,7 +117,6 @@ export default function PixiArmyLayer({
     const fxRef = useRef<Container | null>(null);
     const animTexturesRef = useRef<Map<string, Texture[]>>(new Map());
     const readyRef = useRef(false);
-    const lastCombatKey = useRef<string | null>(null);
     const centersRef = useRef(centers);
     const territoriesRef = useRef(territories);
     const factionsRef = useRef(factions);
@@ -191,35 +190,7 @@ export default function PixiArmyLayer({
         };
     }, [enabled]);
 
-    useEffect(() => {
-        if (!combat) return;
-        const key = `${combat.sourceCountryId}-${combat.destinationCountryId}-${(combat.lastAttackerDice ?? []).join(",")}-${combat.lastAttackerLosses}-${combat.lastDefenderLosses}-${combat.lastDefenderDice?.join(",") ?? ""}`;
-        if (lastCombatKey.current === key) return;
-        lastCombatKey.current = key;
-        presentationQueue.enqueue({
-            id: key,
-            kind: "combat-round",
-            sourceCountryId: combat.sourceCountryId,
-            destinationCountryId: combat.destinationCountryId,
-            attackerLosses: combat.lastAttackerLosses,
-            defenderLosses: combat.lastDefenderLosses,
-            speed: presentationSpeed,
-        });
-        if (
-            (combat.lastDefenderLosses ?? 0) > 0 ||
-            (combat.lastAttackerLosses ?? 0) > 0
-        ) {
-            presentationQueue.enqueue({
-                id: `${key}-cas`,
-                kind: "casualty",
-                sourceCountryId: combat.sourceCountryId,
-                destinationCountryId: combat.destinationCountryId,
-                attackerLosses: combat.lastAttackerLosses,
-                defenderLosses: combat.lastDefenderLosses,
-                speed: presentationSpeed,
-            });
-        }
-    }, [combat, presentationSpeed]);
+    // Combat VFX come from the event stream in Map.tsx — avoid double-enqueue ghosts.
 
     // Camera sync + draw — listeners stay mounted; data reads from refs.
     useEffect(() => {
@@ -474,15 +445,19 @@ export default function PixiArmyLayer({
             const fx = fxRef.current;
             if (!fx || !map) return;
             const centersNow = centersRef.current;
-            const srcLl = item.sourceCountryId
-                ? centersNow[item.sourceCountryId]
-                : null;
-            const dstLl = item.destinationCountryId
-                ? centersNow[item.destinationCountryId]
-                : null;
-            if (!srcLl || !dstLl) return;
+            const srcId = item.sourceCountryId?.toUpperCase();
+            const dstId = item.destinationCountryId?.toUpperCase();
+            const srcLl = srcId ? centersNow[srcId] : null;
+            const dstLl = dstId ? centersNow[dstId] : null;
+            if (!srcLl || !dstLl) {
+                clearContainer(fx);
+                return;
+            }
 
             clearContainer(fx);
+
+            // Casualties only — no beam lines (they drifted and looked like random soldiers).
+            if (item.kind !== "casualty") return;
 
             const midA: [number, number] = [
                 srcLl[0] * 0.55 + dstLl[0] * 0.45,
@@ -493,45 +468,28 @@ export default function PixiArmyLayer({
                 srcLl[1] * 0.35 + dstLl[1] * 0.65,
             ];
 
-            if (item.kind === "casualty") {
-                if ((item.defenderLosses ?? 0) > 0) {
-                    makeSoldier(
-                        fx,
-                        midB,
-                        undefined,
-                        { x: 28, y: -10 },
-                        "hit",
-                        srcLl,
-                        { loop: false, speed: 0.35, scale: SCALE_FX }
-                    );
-                }
-                if ((item.attackerLosses ?? 0) > 0) {
-                    makeSoldier(
-                        fx,
-                        midA,
-                        undefined,
-                        { x: -28, y: 10 },
-                        "hit",
-                        dstLl,
-                        { loop: false, speed: 0.35, scale: SCALE_FX }
-                    );
-                }
+            if ((item.defenderLosses ?? 0) > 0) {
+                makeSoldier(
+                    fx,
+                    midB,
+                    combatRef.current?.defenderFactionId,
+                    { x: 28, y: -10 },
+                    "hit",
+                    srcLl,
+                    { loop: false, speed: 0.35, scale: SCALE_FX }
+                );
             }
-
-            const a = map.project(midA);
-            const b = map.project(midB);
-            const beam = new Graphics();
-            beam.moveTo(a.x, a.y);
-            beam.lineTo(b.x, b.y);
-            beam.stroke({ width: 2, color: 0x2ee6ff, alpha: 0.4 });
-            tagGeo(beam, {
-                lngLat: midA,
-                offsetX: 0,
-                offsetY: 0,
-            });
-            // Beam endpoints are screen-space; drop on camera move instead.
-            (beam as { __ephemeral?: boolean }).__ephemeral = true;
-            fx.addChild(beam);
+            if ((item.attackerLosses ?? 0) > 0) {
+                makeSoldier(
+                    fx,
+                    midA,
+                    combatRef.current?.attackerFactionId,
+                    { x: -28, y: 10 },
+                    "hit",
+                    dstLl,
+                    { loop: false, speed: 0.35, scale: SCALE_FX }
+                );
+            }
         };
 
         const onPresentation = (item: PresentationItem | null) => {
@@ -540,8 +498,11 @@ export default function PixiArmyLayer({
                 redrawLod();
                 return;
             }
-            if (item.kind === "combat-round" || item.kind === "casualty") {
+            if (item.kind === "casualty") {
                 playSkirmish(item);
+            } else if (item.kind === "combat-round") {
+                clearContainer(fxRef.current);
+                redrawLod();
             }
         };
 
