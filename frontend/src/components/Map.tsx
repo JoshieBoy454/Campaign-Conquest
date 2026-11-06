@@ -307,30 +307,6 @@ export default function Map({
             currentMap.getCanvas().style.cursor = "";
         });
 
-        // fill-pattern layers lag behind the camera — hide them while panning/zooming.
-        const patternIds = [
-            "terrain-grassy",
-            "terrain-desert",
-            "terrain-icy",
-            "terrain-city",
-        ];
-        const setPatternsVisible = (visible: boolean) => {
-            for (const id of patternIds) {
-                if (!currentMap.getLayer(id)) continue;
-                currentMap.setPaintProperty(
-                    id,
-                    "fill-opacity",
-                    visible ? 0.92 : 0
-                );
-            }
-        };
-        const onMoveStart = () => setPatternsVisible(false);
-        const onMoveEnd = () => setPatternsVisible(true);
-        currentMap.on("movestart", onMoveStart);
-        currentMap.on("zoomstart", onMoveStart);
-        currentMap.on("moveend", onMoveEnd);
-        currentMap.on("zoomend", onMoveEnd);
-
         currentMap.on("click", (event) => {
             const features = currentMap.queryRenderedFeatures(event.point, {
                 layers: ["countries-interactive"],
@@ -377,10 +353,6 @@ export default function Map({
             if (driftTimerRef.current) {
                 window.clearTimeout(driftTimerRef.current);
             }
-            currentMap.off("movestart", onMoveStart);
-            currentMap.off("zoomstart", onMoveStart);
-            currentMap.off("moveend", onMoveEnd);
-            currentMap.off("zoomend", onMoveEnd);
             currentMap.remove();
             map.current = null;
         };
