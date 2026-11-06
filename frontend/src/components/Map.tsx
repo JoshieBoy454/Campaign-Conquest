@@ -36,6 +36,7 @@ import {
     loadCountryGeoJson,
     registerTerrainImages,
     setParticipation,
+    syncTerrainPatternVisibility,
 } from "../map/setupCountryLayers";
 import { presentationQueue } from "../services/presentationQueue";
 import type { CountryDefinition, GameState } from "../types/game";
@@ -261,6 +262,7 @@ export default function Map({
 
                     geoRef.current = collection;
                     addCountryLayers(currentMap, collection);
+                    syncTerrainPatternVisibility(currentMap);
                     setCountriesGeometryReady(true);
 
                     // Centers from the same parse (no second GeoJSON fetch).
@@ -306,6 +308,12 @@ export default function Map({
         currentMap.on("mouseleave", "countries-interactive", () => {
             currentMap.getCanvas().style.cursor = "";
         });
+
+        const onZoomForPatterns = () => {
+            syncTerrainPatternVisibility(currentMap);
+        };
+        currentMap.on("zoom", onZoomForPatterns);
+        currentMap.on("zoomend", onZoomForPatterns);
 
         currentMap.on("click", (event) => {
             const features = currentMap.queryRenderedFeatures(event.point, {
@@ -353,6 +361,8 @@ export default function Map({
             if (driftTimerRef.current) {
                 window.clearTimeout(driftTimerRef.current);
             }
+            currentMap.off("zoom", onZoomForPatterns);
+            currentMap.off("zoomend", onZoomForPatterns);
             currentMap.remove();
             map.current = null;
         };
@@ -569,10 +579,16 @@ export default function Map({
         });
     }
 
-    async function runGameAction(action: () => Promise<GameState>): Promise<boolean> {
+    async function runGameAction(
+        action: () => Promise<GameState>,
+        optimistic?: (prev: GameState) => GameState
+    ): Promise<boolean> {
         if (!game || actionBusy) return false;
         setActionBusy(true);
         setError(null);
+        if (optimistic) {
+            setGame((prev) => (prev ? optimistic(prev) : prev));
+        }
         try {
             mergeGame(await action());
             return true;
@@ -1012,39 +1028,134 @@ export default function Map({
                         onConfirmPending={() => {
                             if (!pendingCommit) return;
                             const pending = pendingCommit;
-                            const count = Math.min(
-                                commitCountRef.current,
-                                pending.maxSoldiers
+                            const count = Math.max(
+                                1,
+                                Math.min(
+                                    commitCountRef.current,
+                                    pending.maxSoldiers
+                                )
                             );
+                            const expectedVersion = game.version;
                             void (async () => {
                                 const ok =
                                     pending.kind === "transfer"
-                                        ? await runGameAction(() =>
-                                              transferSoldiers(
-                                                  game.id,
-                                                  game.version,
-                                                  pending.sourceId,
-                                                  pending.destId,
-                                                  Math.max(1, count)
-                                              )
+                                        ? await runGameAction(
+                                              () =>
+                                                  transferSoldiers(
+                                                      game.id,
+                                                      expectedVersion,
+                                                      pending.sourceId,
+                                                      pending.destId,
+                                                      count
+                                                  ),
+                                              (prev) => ({
+                                                  ...prev,
+                                                  version: prev.version + 1,
+                                                  territories:
+                                                      prev.territories.map(
+                                                          (t) => {
+                                                              if (
+                                                                  t.countryId ===
+                                                                  pending.sourceId
+                                                              ) {
+                                                                  return {
+                                                                      ...t,
+                                                                      soldiers:
+                                                                          t.soldiers -
+                                                                          count,
+                                                                  };
+                                                              }
+                                                              if (
+                                                                  t.countryId ===
+                                                                  pending.destId
+                                                              ) {
+                                                                  return {
+                                                                      ...t,
+                                                                      soldiers:
+                                                                          t.soldiers +
+                                                                          count,
+                                                                  };
+                                                              }
+                                                              return t;
+                                                          }
+                                                      ),
+                                              })
                                           )
-                                        : await runGameAction(() =>
-                                              startCombat(
-                                                  game.id,
-                                                  game.version,
-                                                  pending.sourceId,
-                                                  pending.destId,
-                                                  Math.max(1, count)
-                                              )
+                                        : await runGameAction(
+                                              () =>
+                                                  startCombat(
+                                                      game.id,
+                                                      expectedVersion,
+                                                      pending.sourceId,
+                                                      pending.destId,
+                                                      count
+                                                  ),
+                                              (prev) => {
+                                                  const dest =
+                                                      prev.territories.find(
+                                                          (t) =>
+                                                              t.countryId ===
+                                                              pending.destId
+                                                      );
+                                                  const human =
+                                                      prev.factions.find(
+                                                          (f) =>
+                                                              f.type ===
+                                                              FactionType.Human
+                                                      );
+                                                  if (!dest || !human) {
+                                                      return {
+                                                          ...prev,
+                                                          version:
+                                                              prev.version + 1,
+                                                      };
+                                                  }
+                                                  return {
+                                                      ...prev,
+                                                      version: prev.version + 1,
+                                                      territories:
+                                                          prev.territories.map(
+                                                              (t) =>
+                                                                  t.countryId ===
+                                                                  pending.sourceId
+                                                                      ? {
+                                                                            ...t,
+                                                                            soldiers:
+                                                                                t.soldiers -
+                                                                                count,
+                                                                        }
+                                                                      : t
+                                                          ),
+                                                      activeCombat: {
+                                                          attackerFactionId:
+                                                              human.id,
+                                                          defenderFactionId:
+                                                              dest.ownerFactionId,
+                                                          sourceCountryId:
+                                                              pending.sourceId,
+                                                          destinationCountryId:
+                                                              pending.destId,
+                                                          attackerSoldiers:
+                                                              count,
+                                                          defenderSoldiers:
+                                                              dest.soldiers,
+                                                          lastAttackerDice: [],
+                                                          lastDefenderDice: [],
+                                                          lastAttackerLosses: 0,
+                                                          lastDefenderLosses: 0,
+                                                      },
+                                                  };
+                                              }
                                           );
                                 if (ok) setPendingCommit(null);
                             })();
                         }}
-                        onAdvance={() =>
+                        onAdvance={() => {
+                            const expectedVersion = game.version;
                             void runGameAction(() =>
-                                advancePhase(game.id, game.version)
-                            )
-                        }
+                                advancePhase(game.id, expectedVersion)
+                            );
+                        }}
                         onAllocate={() => {
                             if (!selectedCountry || !canPlaceOnSelected) {
                                 setError(
@@ -1052,29 +1163,53 @@ export default function Map({
                                 );
                                 return;
                             }
-                            const n = Math.min(
-                                commitCountRef.current,
-                                game.reinforcementPool
-                            );
-                            void runGameAction(() =>
-                                allocateReinforcements(
-                                    game.id,
-                                    game.version,
-                                    String(selectedCountry.id),
-                                    Math.max(1, n)
+                            const countryId = String(selectedCountry.id);
+                            const n = Math.max(
+                                1,
+                                Math.min(
+                                    commitCountRef.current,
+                                    game.reinforcementPool
                                 )
                             );
+                            const expectedVersion = game.version;
+                            void runGameAction(
+                                () =>
+                                    allocateReinforcements(
+                                        game.id,
+                                        expectedVersion,
+                                        countryId,
+                                        n
+                                    ),
+                                (prev) => ({
+                                    ...prev,
+                                    version: prev.version + 1,
+                                    reinforcementPool: Math.max(
+                                        0,
+                                        prev.reinforcementPool - n
+                                    ),
+                                    territories: prev.territories.map((t) =>
+                                        t.countryId === countryId
+                                            ? {
+                                                  ...t,
+                                                  soldiers: t.soldiers + n,
+                                              }
+                                            : t
+                                    ),
+                                })
+                            );
                         }}
-                        onRollCombat={() =>
+                        onRollCombat={() => {
+                            const expectedVersion = game.version;
                             void runGameAction(() =>
-                                rollCombat(game.id, game.version)
-                            )
-                        }
-                        onRetreat={() =>
+                                rollCombat(game.id, expectedVersion)
+                            );
+                        }}
+                        onRetreat={() => {
+                            const expectedVersion = game.version;
                             void runGameAction(() =>
-                                retreatCombat(game.id, game.version)
-                            )
-                        }
+                                retreatCombat(game.id, expectedVersion)
+                            );
+                        }}
                     />
                     <DiceOverlay
                         combat={displayCombat}

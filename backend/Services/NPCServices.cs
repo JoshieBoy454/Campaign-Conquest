@@ -13,18 +13,47 @@ public sealed record NpcTurnResult(IReadOnlyList<NpcLoggedEvent> Events);
 
 // ---- Simple NPC heuristics (no LLM yet) ----
 public interface INpcDecisionPolicy {
+    /// <summary>One visible NPC action (advance, reinforce, start/roll/retreat/skip).</summary>
+    NpcTurnResult PlayStep(GameState game, Guid npcFactionId, TurnService turnService, CombatService combatService);
+
+    /// <summary>Runs PlayStep until the NPC no longer owns the turn (tests / catch-up).</summary>
     NpcTurnResult PlayTurn(GameState game, Guid npcFactionId, TurnService turnService, CombatService combatService);
 }
 
 public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
 
-    private const int MaxPhaseSteps = 20;
+    private const int MaxPhaseSteps = 40;
 
     public NpcTurnResult PlayTurn(GameState game, Guid npcFactionId, TurnService turnService, CombatService combatService) {
 
         List<NpcLoggedEvent> events = [];
+        int steps = 0;
 
-        if (game.CurrentFactionId != npcFactionId) {
+        while (
+            game.Status == GameStatus.InProgress
+            && game.CurrentFactionId == npcFactionId
+            && steps++ < MaxPhaseSteps) {
+
+            NpcTurnResult step = PlayStep(game, npcFactionId, turnService, combatService);
+            if (step.Events.Count == 0) {
+                break;
+            }
+
+            events.AddRange(step.Events);
+        }
+
+        return new NpcTurnResult(events);
+    }
+
+    public NpcTurnResult PlayStep(
+        GameState game,
+        Guid npcFactionId,
+        TurnService turnService,
+        CombatService combatService) {
+
+        List<NpcLoggedEvent> events = [];
+
+        if (game.CurrentFactionId != npcFactionId || game.Status != GameStatus.InProgress) {
             return new NpcTurnResult(events);
         }
 
@@ -35,82 +64,86 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
         }
 
         string npcName = string.IsNullOrWhiteSpace(npc.Name) ? "NPC" : npc.Name;
-        int steps = 0;
 
-        while (
-            game.Status == GameStatus.InProgress
-            && game.CurrentFactionId == npcFactionId
-            && steps++ < MaxPhaseSteps) {
+        try {
+            switch (game.CurrentPhase) {
 
-            try {
-                switch (game.CurrentPhase) {
+                case TurnPhase.Upkeep:
+                    turnService.AdvancePhase(game, npcFactionId);
+                    LogAdvance(events, game, npcFactionId, npcName);
+                    break;
 
-                    case TurnPhase.Upkeep:
-                        turnService.AdvancePhase(game, npcFactionId);
-                        LogAdvance(events, game, npcFactionId, npcName);
-                        break;
-
-                    case TurnPhase.ReinforcementOne:
-                    case TurnPhase.ReinforcementTwo:
+                case TurnPhase.ReinforcementOne:
+                case TurnPhase.ReinforcementTwo:
+                    if (game.ReinforcementPool > 0) {
                         SpendReinforcementPool(game, npcFactionId, npcName, turnService, events);
+                    }
+                    else {
                         turnService.AdvancePhase(game, npcFactionId);
                         LogAdvance(events, game, npcFactionId, npcName);
-                        break;
+                    }
+                    break;
 
-                    case TurnPhase.Combat:
-                        TryCombatOrSkip(game, npcFactionId, npcName, combatService, events);
-
-                        if (game.ActiveCombat != null) {
-                            ResolveCombatUntilDone(game, npcFactionId, npcName, combatService, events);
-                        }
-
-                        // Retreat / fail leave phase on Combat — force advance
+                case TurnPhase.Combat:
+                    if (game.ActiveCombat != null) {
+                        ResolveOneCombatStep(game, npcFactionId, npcName, combatService, events);
+                        // Engagement finished this step — leave Combat so we do not start a second fight.
                         if (
-                            game.Status == GameStatus.InProgress
+                            game.ActiveCombat == null
+                            && game.Status == GameStatus.InProgress
                             && game.CurrentFactionId == npcFactionId
-                            && game.CurrentPhase == TurnPhase.Combat
-                            && game.ActiveCombat == null) {
+                            && game.CurrentPhase == TurnPhase.Combat) {
                             combatService.SkipCombat(game, npcFactionId);
                             events.Add(new NpcLoggedEvent("SkipCombat", new {
                                 factionId = npcFactionId,
                                 factionName = npcName,
                                 phase = game.CurrentPhase.ToString(),
                                 actor = "NPC",
+                                reason = "engagementComplete",
                             }));
                         }
-                        break;
-
-                    case TurnPhase.EndTurn:
-                        turnService.AdvancePhase(game, npcFactionId);
-                        LogAdvance(events, game, npcFactionId, npcName);
-                        break;
-
-                    default:
-                        return new NpcTurnResult(events);
-                }
-            }
-            catch (InvalidOperationException) {
-                // Bad mid-turn state — abandon this NPC turn rather than spin
-                if (
-                    game.Status == GameStatus.InProgress
-                    && game.CurrentFactionId == npcFactionId
-                    && game.CurrentPhase == TurnPhase.Combat
-                    && game.ActiveCombat == null) {
-                    try {
+                    }
+                    else if (game.ConqueredThisTurn.Count > 0) {
                         combatService.SkipCombat(game, npcFactionId);
                         events.Add(new NpcLoggedEvent("SkipCombat", new {
                             factionId = npcFactionId,
                             factionName = npcName,
                             phase = game.CurrentPhase.ToString(),
                             actor = "NPC",
-                            reason = "recovery",
+                            reason = "alreadyConqueredOrEngaged",
                         }));
                     }
-                    catch (InvalidOperationException) {
-                        return new NpcTurnResult(events);
+                    else {
+                        TryCombatOrSkip(game, npcFactionId, npcName, combatService, events);
                     }
+                    break;
+
+                case TurnPhase.EndTurn:
+                    turnService.AdvancePhase(game, npcFactionId);
+                    LogAdvance(events, game, npcFactionId, npcName);
+                    break;
+
+                default:
+                    break;
+            }
+        }
+        catch (InvalidOperationException) {
+            if (
+                game.Status == GameStatus.InProgress
+                && game.CurrentFactionId == npcFactionId
+                && game.CurrentPhase == TurnPhase.Combat
+                && game.ActiveCombat == null) {
+                try {
+                    combatService.SkipCombat(game, npcFactionId);
+                    events.Add(new NpcLoggedEvent("SkipCombat", new {
+                        factionId = npcFactionId,
+                        factionName = npcName,
+                        phase = game.CurrentPhase.ToString(),
+                        actor = "NPC",
+                        reason = "recovery",
+                    }));
                 }
-                else {
+                catch (InvalidOperationException) {
                     return new NpcTurnResult(events);
                 }
             }
@@ -175,18 +208,6 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
         string factionName,
         CombatService combatService,
         List<NpcLoggedEvent> events) {
-
-        if (game.ConqueredThisTurn.Count > 0 || game.ActiveCombat != null) {
-            combatService.SkipCombat(game, factionId);
-            events.Add(new NpcLoggedEvent("SkipCombat", new {
-                factionId,
-                factionName,
-                phase = game.CurrentPhase.ToString(),
-                actor = "NPC",
-                reason = "alreadyConqueredOrEngaged",
-            }));
-            return;
-        }
 
         // Prefer the weakest enemy we can outnumber with a full leave-one-behind commit.
         Territory? source = null;
@@ -256,60 +277,56 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
         }
     }
 
-    private static void ResolveCombatUntilDone(
+    private static void ResolveOneCombatStep(
         GameState game,
         Guid factionId,
         string factionName,
         CombatService combatService,
         List<NpcLoggedEvent> events) {
 
-        int safety = 64;
+        CombatState combat = game.ActiveCombat
+            ?? throw new InvalidOperationException("No active combat");
 
-        while (game.ActiveCombat != null && safety-- > 0) {
+        string sourceName = TerritoryName(game, combat.SourceCountryId);
+        string destinationName = TerritoryName(game, combat.DestinationCountryId);
 
-            CombatState combat = game.ActiveCombat;
-            string sourceName = TerritoryName(game, combat.SourceCountryId);
-            string destinationName = TerritoryName(game, combat.DestinationCountryId);
-
-            if (combat.AttackerSoldiers <= combat.DefenderSoldiers) {
-                int retreated = combat.AttackerSoldiers;
-                combatService.Retreat(game, factionId);
-                events.Add(new NpcLoggedEvent("RetreatCombat", new {
-                    factionId,
-                    factionName,
-                    sourceCountryId = combat.SourceCountryId,
-                    sourceName,
-                    destinationCountryId = combat.DestinationCountryId,
-                    destinationName,
-                    soldiersRetreated = retreated,
-                    actor = "NPC",
-                }));
-                break;
-            }
-
-            CombatState snap = combatService.ResolveNextRound(game, factionId);
-            bool finished = game.ActiveCombat == null;
-            object payload = new {
+        if (combat.AttackerSoldiers <= combat.DefenderSoldiers) {
+            int retreated = combat.AttackerSoldiers;
+            combatService.Retreat(game, factionId);
+            events.Add(new NpcLoggedEvent("RetreatCombat", new {
                 factionId,
                 factionName,
-                sourceCountryId = snap.SourceCountryId,
+                sourceCountryId = combat.SourceCountryId,
                 sourceName,
-                destinationCountryId = snap.DestinationCountryId,
+                destinationCountryId = combat.DestinationCountryId,
                 destinationName,
-                round = snap.RoundNumber,
-                attackerDice = snap.LastAttackerDice.ToArray(),
-                defenderDice = snap.LastDefenderDice.ToArray(),
-                attackerLosses = snap.LastAttackerLosses,
-                defenderLosses = snap.LastDefenderLosses,
-                attackerSoldiersRemaining = snap.AttackerSoldiers,
-                defenderSoldiersRemaining = snap.DefenderSoldiers,
-                battleFinished = finished,
+                soldiersRetreated = retreated,
                 actor = "NPC",
-            };
-            // Same shape human ResolveCombatRound uses — ActionLog + map VFX.
-            events.Add(new NpcLoggedEvent("ResolveCombatRound", payload));
-            events.Add(new NpcLoggedEvent("NpcCombatRound", payload));
+            }));
+            return;
         }
+
+        CombatState snap = combatService.ResolveNextRound(game, factionId);
+        bool finished = game.ActiveCombat == null;
+        object payload = new {
+            factionId,
+            factionName,
+            sourceCountryId = snap.SourceCountryId,
+            sourceName,
+            destinationCountryId = snap.DestinationCountryId,
+            destinationName,
+            round = snap.RoundNumber,
+            attackerDice = snap.LastAttackerDice.ToArray(),
+            defenderDice = snap.LastDefenderDice.ToArray(),
+            attackerLosses = snap.LastAttackerLosses,
+            defenderLosses = snap.LastDefenderLosses,
+            attackerSoldiersRemaining = snap.AttackerSoldiers,
+            defenderSoldiersRemaining = snap.DefenderSoldiers,
+            battleFinished = finished,
+            actor = "NPC",
+        };
+        events.Add(new NpcLoggedEvent("ResolveCombatRound", payload));
+        events.Add(new NpcLoggedEvent("NpcCombatRound", payload));
     }
 
     private static string TerritoryName(GameState game, string countryId) {
@@ -325,7 +342,7 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
     }
 }
 
-// ---- Background loop: advance NPC turns when it is their go ----
+// ---- Background loop: one NPC step at a time, delay outside the game lock ----
 public class NpcTurnHostedService : BackgroundService {
 
     private static readonly JsonSerializerOptions PayloadJsonOptions = new() {
@@ -339,6 +356,7 @@ public class NpcTurnHostedService : BackgroundService {
     private readonly IGameEventRepository _gameEventRepository;
     private readonly IConfiguration _configuration;
     private readonly ILogger<NpcTurnHostedService> _logger;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, long> _cooldownUntilMs = new();
 
     public NpcTurnHostedService(
         IServiceScopeFactory scopeFactory,
@@ -360,6 +378,7 @@ public class NpcTurnHostedService : BackgroundService {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
 
         while (!stoppingToken.IsCancellationRequested) {
+            long nowMs = Environment.TickCount64;
 
             await foreach (GameState snapshot in _gameRepository.GetAllAsync(stoppingToken)) {
 
@@ -373,38 +392,53 @@ public class NpcTurnHostedService : BackgroundService {
                     continue;
                 }
 
+                if (_cooldownUntilMs.TryGetValue(snapshot.Id, out long until) && until > nowMs) {
+                    continue;
+                }
+
                 SemaphoreSlim gate = _concurrencyGate.Get(snapshot.Id);
 
                 if (!await gate.WaitAsync(0, stoppingToken)) {
                     continue;
                 }
 
+                bool stepped = false;
+                int cooldownMs = 0;
+
                 try {
-                    await RunNpcTurn(snapshot.Id, current.Id, stoppingToken);
+                    (stepped, cooldownMs) = await RunNpcStep(snapshot.Id, current.Id, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) {
-                    _logger.LogWarning(ex, "NPC turn failed for game {GameId}", snapshot.Id);
+                    _logger.LogWarning(ex, "NPC step failed for game {GameId}", snapshot.Id);
                 }
                 finally {
                     gate.Release();
                 }
+
+                // Pace presentation without holding the concurrency gate (player actions stay snappy).
+                if (stepped && cooldownMs > 0) {
+                    _cooldownUntilMs[snapshot.Id] = Environment.TickCount64 + cooldownMs;
+                }
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(200), stoppingToken);
         }
     }
 
-    private async Task RunNpcTurn(Guid gameId, Guid npcFactionId, CancellationToken stoppingToken) {
+    private async Task<(bool Stepped, int CooldownMs)> RunNpcStep(
+        Guid gameId,
+        Guid npcFactionId,
+        CancellationToken stoppingToken) {
 
         GameState? game = await _gameRepository.GetAsync(gameId, stoppingToken);
 
-        if (game == null) {
-            return;
+        if (game == null || game.CurrentFactionId != npcFactionId) {
+            return (false, 0);
         }
 
-        int baseDelayMs = _configuration.GetValue("Npc:BaseDelayMs", 1400);
+        int baseDelayMs = _configuration.GetValue("Npc:BaseDelayMs", 2200);
         int speed = Math.Clamp(game.NpcSpeed, 1, 8);
-        TimeSpan delay = TimeSpan.FromMilliseconds(Math.Max(100, baseDelayMs) / (double)speed);
+        int cooldownMs = Math.Max(80, (int)(Math.Max(100, baseDelayMs) / (double)speed));
 
         using IServiceScope scope = _scopeFactory.CreateScope();
 
@@ -412,53 +446,53 @@ public class NpcTurnHostedService : BackgroundService {
         TurnService turnService = scope.ServiceProvider.GetRequiredService<TurnService>();
         CombatService combatService = scope.ServiceProvider.GetRequiredService<CombatService>();
 
-        Guid startingFaction = game.CurrentFactionId ?? npcFactionId;
-        TurnPhase startingPhase = game.CurrentPhase;
         long versionAtStart = game.Version;
         string npcName = game.Factions.FirstOrDefault(f => f.Id == npcFactionId)?.Name ?? "NPC";
 
-        NpcTurnResult turnResult = policy.PlayTurn(game, npcFactionId, turnService, combatService);
+        NpcTurnResult stepResult = policy.PlayStep(game, npcFactionId, turnService, combatService);
+
+        if (game.Version <= versionAtStart && stepResult.Events.Count == 0) {
+            return (false, 0);
+        }
 
         if (game.Version > versionAtStart) {
             bool saved = await _gameRepository.TryReplaceAsync(game, versionAtStart, stoppingToken);
 
-            if (saved) {
-                if (turnResult.Events.Count == 0) {
-                    // Fallback so the log never stays silent after a mutating NPC turn.
-                    await AppendNpcEventBestEffort(gameId, "NpcTurn", new {
-                        factionId = npcFactionId,
-                        factionName = npcName,
-                        version = game.Version,
-                        phase = game.CurrentPhase.ToString(),
-                        actor = "NPC",
-                    }, stoppingToken);
-                }
-                else {
-                    foreach (NpcLoggedEvent logged in turnResult.Events) {
-                        await AppendNpcEventBestEffort(gameId, logged.Type, logged.Payload, stoppingToken);
-                    }
-                }
-
-                try {
-                    await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, stoppingToken);
-                }
-                catch {
-                    /* best-effort */
-                }
-
-                QueueNpcCommentary(gameId, turnResult.Events);
-            }
-            else {
+            if (!saved) {
                 _logger.LogWarning(
-                    "NPC turn save lost for game {GameId} (expected version {Version})",
+                    "NPC step save lost for game {GameId} (expected version {Version})",
                     gameId,
                     versionAtStart);
+                return (false, 0);
             }
+
+            if (stepResult.Events.Count == 0) {
+                await AppendNpcEventBestEffort(gameId, "NpcTurn", new {
+                    factionId = npcFactionId,
+                    factionName = npcName,
+                    version = game.Version,
+                    phase = game.CurrentPhase.ToString(),
+                    actor = "NPC",
+                }, stoppingToken);
+            }
+            else {
+                foreach (NpcLoggedEvent logged in stepResult.Events) {
+                    await AppendNpcEventBestEffort(gameId, logged.Type, logged.Payload, stoppingToken);
+                }
+            }
+
+            try {
+                await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, stoppingToken);
+            }
+            catch {
+                /* best-effort */
+            }
+
+            QueueNpcCommentary(gameId, stepResult.Events);
+            return (true, cooldownMs);
         }
 
-        if (game.CurrentFactionId != startingFaction || game.CurrentPhase != startingPhase || game.ActiveCombat != null) {
-            await Task.Delay(delay, stoppingToken);
-        }
+        return (stepResult.Events.Count > 0, cooldownMs);
     }
 
     private async Task AppendNpcEventBestEffort(

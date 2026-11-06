@@ -42,7 +42,13 @@ function tintFromHex(hex: string): number {
     return Number.isFinite(n) ? n : 0x888888;
 }
 
+const badgeTextureCache = new Map<string, Texture>();
+
 function badgeTexture(count: number, fill: number): Texture {
+    const key = `${count}|${fill}`;
+    const cached = badgeTextureCache.get(key);
+    if (cached) return cached;
+
     const canvas = document.createElement("canvas");
     canvas.width = 64;
     canvas.height = 32;
@@ -60,7 +66,13 @@ function badgeTexture(count: number, fill: number): Texture {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(count), 32, 17);
-    return Texture.from(canvas);
+    const texture = Texture.from(canvas);
+    badgeTextureCache.set(key, texture);
+    if (badgeTextureCache.size > 120) {
+        const first = badgeTextureCache.keys().next().value;
+        if (first != null) badgeTextureCache.delete(first);
+    }
+    return texture;
 }
 
 /**

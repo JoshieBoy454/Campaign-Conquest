@@ -2,7 +2,9 @@ import type { Map as MapLibreMap, GeoJSONSource } from "maplibre-gl";
 import type { FeatureCollection } from "geojson";
 import {
     COUNTRIES_GEOJSON_URL,
+    PATTERN_MIN_ZOOM,
     TERRAIN_IMAGE_URLS,
+    TERRAIN_PATTERN_LAYER_IDS,
     defaultTerrainClass,
     type TerrainClass,
 } from "./terrainConfig";
@@ -143,13 +145,17 @@ export function addCountryLayers(map: MapLibreMap, data: FeatureCollection) {
         });
     }
 
-    // Pattern fills on top of underlays
+    // Pattern fills on top of underlays (zoom-gated — cheaper while panning the world).
+    const showPatterns = map.getZoom() >= PATTERN_MIN_ZOOM;
     for (const terrain of ["grassy", "desert", "icy", "city"] as TerrainClass[]) {
         map.addLayer({
             id: `terrain-${terrain}`,
             type: "fill",
             source: "countries",
             filter: ["==", ["get", "terrainClass"], terrain],
+            layout: {
+                visibility: showPatterns ? "visible" : "none",
+            },
             paint: {
                 "fill-pattern": terrain,
                 "fill-opacity": 0.92,
@@ -263,6 +269,16 @@ export function setParticipation(
     }
 
     return next;
+}
+
+/** Toggle fill-pattern layers from zoom — underlays stay on so land never blanks. */
+export function syncTerrainPatternVisibility(map: MapLibreMap): void {
+    const visible = map.getZoom() >= PATTERN_MIN_ZOOM ? "visible" : "none";
+    for (const id of TERRAIN_PATTERN_LAYER_IDS) {
+        if (!map.getLayer(id)) continue;
+        if (map.getLayoutProperty(id, "visibility") === visible) continue;
+        map.setLayoutProperty(id, "visibility", visible);
+    }
 }
 
 export function resetToSelectable(

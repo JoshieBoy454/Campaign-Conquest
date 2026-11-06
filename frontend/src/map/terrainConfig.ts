@@ -26,6 +26,16 @@ export const TERRAIN_IMAGE_URLS: Record<Exclude<TerrainClass, "city"> | "city", 
 
 export const COUNTRIES_GEOJSON_URL = "/countries.simplified.geojson";
 
+/** Fill-pattern terrain only at/above this zoom — solid underlays cover the rest. */
+export const PATTERN_MIN_ZOOM = 2.35;
+
+export const TERRAIN_PATTERN_LAYER_IDS = [
+    "terrain-grassy",
+    "terrain-desert",
+    "terrain-icy",
+    "terrain-city",
+] as const;
+
 export function defaultTerrainClass(iso: string): Exclude<TerrainClass, "city"> {
     const id = iso.toUpperCase();
     if (ICE_ISOS.has(id)) {

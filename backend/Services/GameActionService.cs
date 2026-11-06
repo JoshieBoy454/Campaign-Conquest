@@ -386,26 +386,51 @@ public class GameActionService {
                 throw new GameVersionConflictException(expectedVersion, current?.Version ?? -1);
             }
 
-            // Event log / SignalR must not roll a successful mutate into HTTP 500.
+            object? extra = null;
             try {
-                object? extra = payloadFactory?.Invoke(game);
-                await AppendEventAsync(gameId, actionId, eventType, game, extra, cancellationToken);
+                extra = payloadFactory?.Invoke(game);
             }
             catch (Exception ex) {
                 System.Diagnostics.Debug.WriteLine(
-                    $"AppendEventAsync failed for {eventType} game {gameId}: {ex.Message}");
-            }
-
-            try {
-                await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, cancellationToken);
-            }
-            catch {
-                // best-effort — client also polls
+                    $"payloadFactory failed for {eventType} game {gameId}: {ex.Message}");
             }
 
             if (idempotencyKey != null) {
                 _completedActions[idempotencyKey] = game;
             }
+
+            // Return the mutate result immediately — event log + SignalR are best-effort
+            // and must not add round-trip latency to every player click.
+            Guid notifyGameId = gameId;
+            GameState notifyState = game;
+            string notifyType = eventType;
+            string? notifyActionId = actionId;
+            object? notifyExtra = extra;
+            _ = Task.Run(async () => {
+                try {
+                    await AppendEventAsync(
+                        notifyGameId,
+                        notifyActionId,
+                        notifyType,
+                        notifyState,
+                        notifyExtra,
+                        CancellationToken.None);
+                }
+                catch (Exception ex) {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"AppendEventAsync failed for {notifyType} game {notifyGameId}: {ex.Message}");
+                }
+
+                try {
+                    await _gameStateNotifier.NotifyGameStateUpdatedAsync(
+                        notifyGameId,
+                        notifyState,
+                        CancellationToken.None);
+                }
+                catch {
+                    // client also polls
+                }
+            }, CancellationToken.None);
 
             return game;
         }

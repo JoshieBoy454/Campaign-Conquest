@@ -53,7 +53,7 @@ class PresentationQueue {
         while (this.queue.length > 0) {
             const item = this.queue.shift()!;
             this.emit(item);
-            const base = item.kind === "combat-round" ? 1200 : 800;
+            const base = item.kind === "combat-round" ? 900 : 550;
             const ms = Math.round(base / (item.speed ?? 1));
             await new Promise((r) => setTimeout(r, ms));
         }
