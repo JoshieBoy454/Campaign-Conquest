@@ -184,18 +184,15 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
                 break;
             }
 
-            string source = combat.SourceCountryId;
-            string destination = combat.DestinationCountryId;
-            combatService.ResolveNextRound(game, factionId);
+            CombatState snap = combatService.ResolveNextRound(game, factionId);
 
-            // ResolveNextRound mutates this object before clearing ActiveCombat
             rounds.Add(new NpcCombatRoundSnapshot(
-                source,
-                destination,
-                combat.LastAttackerDice.ToArray(),
-                combat.LastDefenderDice.ToArray(),
-                combat.LastAttackerLosses,
-                combat.LastDefenderLosses,
+                snap.SourceCountryId,
+                snap.DestinationCountryId,
+                snap.LastAttackerDice.ToArray(),
+                snap.LastDefenderDice.ToArray(),
+                snap.LastAttackerLosses,
+                snap.LastDefenderLosses,
                 game.ActiveCombat == null));
         }
 
@@ -303,41 +300,41 @@ public class NpcTurnHostedService : BackgroundService {
             bool saved = await _gameRepository.TryReplaceAsync(game, versionAtStart, stoppingToken);
 
             if (saved) {
-                await _gameEventRepository.AppendAsync(new GameEvent {
-                    GameId = gameId,
-                    EventId = Guid.NewGuid().ToString("N"),
-                    Type = "NpcTurn",
-                    OccurredAtUtc = DateTime.UtcNow,
-                    PayloadJson = JsonSerializer.Serialize(new {
-                        factionId = npcFactionId,
-                        factionName = npcName,
-                        version = game.Version,
-                        phase = game.CurrentPhase.ToString(),
-                        combatRounds = turnResult.CombatRounds.Count,
-                    }),
+                await AppendNpcEventBestEffort(gameId, "NpcTurn", new {
+                    factionId = npcFactionId,
+                    factionName = npcName,
+                    version = game.Version,
+                    phase = game.CurrentPhase.ToString(),
+                    combatRounds = turnResult.CombatRounds.Count,
                 }, stoppingToken);
 
+                int roundIndex = 0;
                 foreach (NpcCombatRoundSnapshot round in turnResult.CombatRounds) {
-                    await _gameEventRepository.AppendAsync(new GameEvent {
-                        GameId = gameId,
-                        EventId = Guid.NewGuid().ToString("N"),
-                        Type = "NpcCombatRound",
-                        OccurredAtUtc = DateTime.UtcNow,
-                        PayloadJson = JsonSerializer.Serialize(new {
-                            factionId = npcFactionId,
-                            factionName = npcName,
-                            sourceCountryId = round.SourceCountryId,
-                            destinationCountryId = round.DestinationCountryId,
-                            attackerDice = round.AttackerDice,
-                            defenderDice = round.DefenderDice,
-                            attackerLosses = round.AttackerLosses,
-                            defenderLosses = round.DefenderLosses,
-                            battleFinished = round.BattleFinished,
-                        }),
+                    roundIndex++;
+                    string sourceName = TerritoryName(game, round.SourceCountryId);
+                    string destinationName = TerritoryName(game, round.DestinationCountryId);
+                    await AppendNpcEventBestEffort(gameId, "NpcCombatRound", new {
+                        factionId = npcFactionId,
+                        factionName = npcName,
+                        round = roundIndex,
+                        sourceCountryId = round.SourceCountryId,
+                        sourceName,
+                        destinationCountryId = round.DestinationCountryId,
+                        destinationName,
+                        attackerDice = round.AttackerDice,
+                        defenderDice = round.DefenderDice,
+                        attackerLosses = round.AttackerLosses,
+                        defenderLosses = round.DefenderLosses,
+                        battleFinished = round.BattleFinished,
                     }, stoppingToken);
                 }
 
-                await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, stoppingToken);
+                try {
+                    await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, stoppingToken);
+                }
+                catch {
+                    /* best-effort */
+                }
 
                 QueueNpcCommentary(gameId, turnResult.CombatRounds);
             }
@@ -346,6 +343,31 @@ public class NpcTurnHostedService : BackgroundService {
         if (game.CurrentFactionId != startingFaction || game.CurrentPhase != startingPhase || game.ActiveCombat != null) {
             await Task.Delay(delay, stoppingToken);
         }
+    }
+
+    private async Task AppendNpcEventBestEffort(
+        Guid gameId,
+        string type,
+        object payload,
+        CancellationToken cancellationToken) {
+        try {
+            await _gameEventRepository.AppendAsync(new GameEvent {
+                GameId = gameId,
+                EventId = Guid.NewGuid().ToString("N"),
+                Type = type,
+                OccurredAtUtc = DateTime.UtcNow,
+                PayloadJson = JsonSerializer.Serialize(payload),
+            }, cancellationToken);
+        }
+        catch {
+            // Never block NPC progression on log write failures
+        }
+    }
+
+    private static string TerritoryName(GameState game, string countryId) {
+        Territory? t = game.Territories.FirstOrDefault(x =>
+            string.Equals(x.CountryId, countryId, StringComparison.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(t?.Name) ? countryId : t!.Name;
     }
 
     private void QueueNpcCommentary(Guid gameId, IReadOnlyList<NpcCombatRoundSnapshot> rounds) {

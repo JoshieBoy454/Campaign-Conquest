@@ -45,10 +45,32 @@ function detailFor(event: GameEventRow): string | null {
             return `${src} → ${dst}`;
         }
 
-        if (
-            event.type === "ResolveCombatRound" ||
-            event.type === "NpcCombatRound"
-        ) {
+        if (event.type === "NpcCombatRound") {
+            const who = str(p.factionName, "NPC");
+            const src = str(p.sourceName ?? p.sourceCountryId);
+            const dst = str(p.destinationName ?? p.destinationCountryId);
+            const round = num(p.round);
+            const aLoss = num(p.attackerLosses) ?? 0;
+            const dLoss = num(p.defenderLosses) ?? 0;
+            const aDice = Array.isArray(p.attackerDice)
+                ? (p.attackerDice as number[]).join("·")
+                : null;
+            const dDice = Array.isArray(p.defenderDice)
+                ? (p.defenderDice as number[]).join("·")
+                : null;
+            return [
+                who,
+                round != null ? `R${round}` : null,
+                `${src} → ${dst}`,
+                aDice && dDice ? `dice ${aDice} / ${dDice}` : null,
+                `losses −${aLoss}/−${dLoss}`,
+                p.battleFinished ? "battle over" : null,
+            ]
+                .filter(Boolean)
+                .join(" · ");
+        }
+
+        if (event.type === "ResolveCombatRound") {
             const src = str(p.sourceName ?? p.sourceCountryId);
             const dst = str(p.destinationName ?? p.destinationCountryId);
             const round = num(p.round);
@@ -111,7 +133,12 @@ function detailFor(event: GameEventRow): string | null {
         }
 
         if (event.type === "NpcTurn") {
-            return str(p.factionName, "");
+            const who = str(p.factionName, "NPC");
+            const rounds = num(p.combatRounds);
+            if (rounds != null && rounds > 0) {
+                return `${who} · ${rounds} combat round${rounds === 1 ? "" : "s"}`;
+            }
+            return who;
         }
     } catch {
         return null;

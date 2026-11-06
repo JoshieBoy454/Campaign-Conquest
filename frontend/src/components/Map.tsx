@@ -475,15 +475,24 @@ export default function Map({
                     { credentials: "include" }
                 );
                 if (!response.ok || cancelled) return;
-                const rows = (await response.json()) as Array<{
-                    eventId: string;
-                    sequence?: number;
-                    type: string;
-                    payloadJson?: string;
-                }>;
-                for (const row of rows) {
-                    after = Math.max(after, row.sequence ?? after);
-                    if (row.type !== "NpcCombatRound" || !row.payloadJson) continue;
+                const rows = (await response.json()) as Array<
+                    Record<string, unknown>
+                >;
+                for (const raw of rows) {
+                    const sequence = Number(raw.sequence ?? raw.Sequence ?? 0);
+                    if (Number.isFinite(sequence)) {
+                        after = Math.max(after, sequence);
+                    }
+                    const type = String(raw.type ?? raw.Type ?? "");
+                    const eventId = String(raw.eventId ?? raw.EventId ?? "");
+                    const payloadJson =
+                        raw.payloadJson != null
+                            ? String(raw.payloadJson)
+                            : raw.PayloadJson != null
+                              ? String(raw.PayloadJson)
+                              : "";
+                    if (type !== "NpcCombatRound" || !payloadJson) continue;
+                    const row = { eventId, payloadJson };
                     try {
                         const payload = JSON.parse(row.payloadJson) as {
                             sourceCountryId?: string;
