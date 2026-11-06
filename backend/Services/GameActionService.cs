@@ -25,6 +25,8 @@ public class GameActionService {
     private readonly GameConcurrencyGate _concurrencyGate;
     private readonly TurnService _turnService;
     private readonly CombatService _combatService;
+    private readonly ICombatCommentaryService _commentaryService;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public GameActionService(
         IGameRepository gameRepository,
@@ -32,7 +34,9 @@ public class GameActionService {
         IGameStateNotifier gameStateNotifier,
         GameConcurrencyGate concurrencyGate,
         TurnService turnService,
-        CombatService combatService) {
+        CombatService combatService,
+        ICombatCommentaryService commentaryService,
+        IServiceScopeFactory scopeFactory) {
 
         _gameRepository = gameRepository;
         _gameEventRepository = gameEventRepository;
@@ -40,6 +44,8 @@ public class GameActionService {
         _concurrencyGate = concurrencyGate;
         _turnService = turnService;
         _combatService = combatService;
+        _commentaryService = commentaryService;
+        _scopeFactory = scopeFactory;
     }
 
     public Task<GameState> AdvancePhase(
@@ -132,22 +138,78 @@ public class GameActionService {
             cancellationToken);
     }
 
-    public Task<GameState> ResolveCombatRound(
+    public async Task<GameState> ResolveCombatRound(
         Guid gameId,
         long expectedVersion,
         string? actionId,
         CancellationToken cancellationToken = default) {
 
-        return ExecuteAsync(
+        GameState game = await ExecuteAsync(
             gameId,
             expectedVersion,
             actionId,
             "ResolveCombatRound",
-            game => {
-                Guid actorId = RequireCurrentFaction(game);
-                _combatService.ResolveNextRound(game, actorId);
+            state => {
+                Guid actorId = RequireCurrentFaction(state);
+                _combatService.ResolveNextRound(state, actorId);
             },
             cancellationToken);
+
+        // commentary is best-effort — never blocks the dice result
+        QueueCommentary(game);
+        return game;
+    }
+
+    private void QueueCommentary(GameState game) {
+        CombatState? combat = game.ActiveCombat;
+        if (combat == null) {
+            return;
+        }
+
+        string attackerCountry = combat.SourceCountryId;
+        string defenderCountry = combat.DestinationCountryId;
+        int[] attackerDice = combat.LastAttackerDice.ToArray();
+        int[] defenderDice = combat.LastDefenderDice.ToArray();
+        int attackerLosses = combat.LastAttackerLosses;
+        int defenderLosses = combat.LastDefenderLosses;
+        bool finished = combat.AttackerSoldiers <= 0 || combat.DefenderSoldiers <= 0;
+        Guid gameId = game.Id;
+
+        _ = Task.Run(async () => {
+            try {
+                string? text = await _commentaryService.GenerateAsync(
+                    new CombatCommentaryContext {
+                        AttackerCountry = attackerCountry,
+                        DefenderCountry = defenderCountry,
+                        Round = Math.Max(1, attackerDice.Length),
+                        AttackerDice = attackerDice,
+                        DefenderDice = defenderDice,
+                        AttackerCasualties = attackerLosses,
+                        DefenderCasualties = defenderLosses,
+                        BattleFinished = finished,
+                    },
+                    CancellationToken.None);
+
+                if (string.IsNullOrWhiteSpace(text)) {
+                    return;
+                }
+
+                await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+                IGameEventRepository events =
+                    scope.ServiceProvider.GetRequiredService<IGameEventRepository>();
+
+                await events.AppendAsync(new GameEvent {
+                    GameId = gameId,
+                    EventId = Guid.NewGuid().ToString("N"),
+                    Type = "CommentaryAvailable",
+                    OccurredAtUtc = DateTime.UtcNow,
+                    PayloadJson = JsonSerializer.Serialize(new { commentary = text }),
+                }, CancellationToken.None);
+            }
+            catch {
+                // swallow — gameplay already committed
+            }
+        });
     }
 
     public Task<GameState> RetreatCombat(

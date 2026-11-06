@@ -19,6 +19,9 @@ import CountryInfoPanel from "./CountryInfoPanel";
 import FactionPanel from "./FactionPanel";
 import PhaseControls from "./PhaseControls";
 import DiceOverlay from "./DiceOverlay";
+import ActionLog from "./ActionLog";
+import PixiEffectsLayer from "./PixiEffectsLayer";
+import GameEndOverlay from "./GameEndOverlay";
 
 import type {
     CountryDefinition,
@@ -788,8 +791,29 @@ export default function Map({ initialGameId = null }: MapProps) {
                 </div>
             )}
 
+            {game && <ActionLog gameId={game.id} />}
+
             {game && (
                 <DiceOverlay combat={game.activeCombat} turnOrderRolls={turnOrderRolls} />
+            )}
+
+            <PixiEffectsLayer
+                enabled={Boolean(game)}
+                pulseKey={
+                    game?.activeCombat
+                        ? `${game.activeCombat.lastAttackerDice?.join("-")}-${game.activeCombat.lastDefenderDice?.join("-")}-${game.version}`
+                        : null
+                }
+            />
+
+            {game && (
+                <GameEndOverlay
+                    game={game}
+                    onHome={() => {
+                        window.history.pushState({}, "", "/");
+                        window.location.assign("/");
+                    }}
+                />
             )}
 
             {game && isHost && (
