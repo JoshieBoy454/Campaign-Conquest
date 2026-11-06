@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Models;
+using Repositories;
 using Rules;
 using Services;
 
@@ -45,8 +46,10 @@ namespace Controllers;
 
         private readonly CountryCatalogueService _countryCatalogue;
         private readonly GameInitializationService _initializationService;
-        private readonly GameStore _gameStore;
+        private readonly IGameRepository _gameRepository;
+        private readonly IGameEventRepository _gameEventRepository;
         private readonly GameActionService _gameActions;
+        private readonly HostSessionService _hostSessionService;
 
         // -----------------------------------------------------------------------------
         // Constructor: GamesController
@@ -55,13 +58,17 @@ namespace Controllers;
         public GamesController(
             CountryCatalogueService countryCatalogue,
             GameInitializationService initializationService,
-            GameStore gameStore,
-            GameActionService gameActions) {
+            IGameRepository gameRepository,
+            IGameEventRepository gameEventRepository,
+            GameActionService gameActions,
+            HostSessionService hostSessionService) {
 
             _countryCatalogue = countryCatalogue;
             _initializationService = initializationService;
-            _gameStore = gameStore;
+            _gameRepository = gameRepository;
+            _gameEventRepository = gameEventRepository;
             _gameActions = gameActions;
+            _hostSessionService = hostSessionService;
         }
 
         // -----------------------------------------------------------------------------
@@ -88,7 +95,9 @@ namespace Controllers;
         // Creates a game using the human player's selected country
         // -------------------------------------------------------------------------
         [HttpPost]
-        public ActionResult<GameInitializationResult> CreateGame([FromBody] CreateGameRequest request) {
+        public async Task<ActionResult<GameInitializationResult>> CreateGame(
+            [FromBody] CreateGameRequest request,
+            CancellationToken cancellationToken) {
             if (request == null || string.IsNullOrWhiteSpace(request.SelectedCountryId)) {
                 return BadRequest(
                     "A starting country must be selected");
@@ -109,8 +118,10 @@ namespace Controllers;
             // Create the factions, territories and D20 turn order
             GameInitializationResult result = _initializationService.CreateGame(request.SelectedCountryId, countries);
 
-            // Save the game temporarily in memory
-            _gameStore.AddGame(result.Game);
+            await _gameRepository.AddAsync(result.Game, cancellationToken);
+
+            string hostToken = await _hostSessionService.CreateSessionAsync(result.Game.Id, cancellationToken);
+            _hostSessionService.SetHostCookie(Response, result.Game.Id, hostToken);
 
             // Return HTTP 201 Created and the game data
             return CreatedAtAction(nameof(GetGame), new { gameId = result.Game.Id },result);
@@ -121,9 +132,9 @@ namespace Controllers;
         // Retrieves a previously created game
         // -------------------------------------------------------------------------
         [HttpGet("{gameId:guid}")]
-        public ActionResult<GameState> GetGame(Guid gameId)
+        public async Task<ActionResult<GameState>> GetGame(Guid gameId, CancellationToken cancellationToken)
         {
-            GameState? game = _gameStore.GetGame(gameId);
+            GameState? game = await _gameRepository.GetAsync(gameId, cancellationToken);
 
             if (game == null) {
                 return NotFound(
@@ -132,80 +143,174 @@ namespace Controllers;
             return Ok(game);
         }
 
-        [HttpPost("{gameId:guid}/actions/advance-phase")]
-        public ActionResult<GameState> AdvancePhase(Guid gameId, [FromBody] VersionedActionRequest request) {
+        [HttpGet("{gameId:guid}/host-status")]
+        public async Task<IActionResult> GetHostStatus(Guid gameId, CancellationToken cancellationToken)
+        {
+            if (await _gameRepository.GetAsync(gameId, cancellationToken) == null) {
+                return NotFound("The requested game could not be found");
+            }
 
-            return RunAction(gameId, () =>
-                _gameActions.AdvancePhase(gameId, request.ExpectedVersion, request.ActionId));
+            bool isHost = await _hostSessionService.IsHostAsync(Request, gameId, cancellationToken);
+            return Ok(new { isHost });
+        }
+
+        [HttpGet("{gameId:guid}/events")]
+        public async Task<IActionResult> GetEvents(
+            Guid gameId,
+            [FromQuery] long afterSequence = 0,
+            [FromQuery] int limit = 100,
+            CancellationToken cancellationToken = default)
+        {
+            if (await _gameRepository.GetAsync(gameId, cancellationToken) == null) {
+                return NotFound("The requested game could not be found");
+            }
+
+            int pageSize = Math.Clamp(limit, 1, 200);
+            IReadOnlyList<GameEvent> events = await _gameEventRepository.GetAfterAsync(
+                gameId,
+                afterSequence,
+                pageSize,
+                cancellationToken);
+
+            return Ok(events);
+        }
+
+        [HttpPost("{gameId:guid}/actions/advance-phase")]
+        public Task<ActionResult<GameState>> AdvancePhase(
+            Guid gameId,
+            [FromBody] VersionedActionRequest request,
+            CancellationToken cancellationToken) {
+
+            return RunAction(
+                gameId,
+                () => _gameActions.AdvancePhase(
+                    gameId,
+                    request.ExpectedVersion,
+                    request.ActionId,
+                    cancellationToken),
+                cancellationToken);
         }
 
         [HttpPost("{gameId:guid}/actions/allocate-reinforcements")]
-        public ActionResult<GameState> AllocateReinforcements(Guid gameId, [FromBody] AllocateReinforcementsActionRequest request) {
+        public Task<ActionResult<GameState>> AllocateReinforcements(
+            Guid gameId,
+            [FromBody] AllocateReinforcementsActionRequest request,
+            CancellationToken cancellationToken) {
 
-            return RunAction(gameId, () =>
-                _gameActions.AllocateReinforcements(
+            return RunAction(
+                gameId,
+                () => _gameActions.AllocateReinforcements(
                     gameId,
                     request.ExpectedVersion,
                     request.ActionId,
                     request.CountryId,
-                    request.SoldierCount));
+                    request.SoldierCount,
+                    cancellationToken),
+                cancellationToken);
         }
 
         [HttpPost("{gameId:guid}/actions/transfer-soldiers")]
-        public ActionResult<GameState> TransferSoldiers(Guid gameId, [FromBody] TransferSoldiersActionRequest request) {
+        public Task<ActionResult<GameState>> TransferSoldiers(
+            Guid gameId,
+            [FromBody] TransferSoldiersActionRequest request,
+            CancellationToken cancellationToken) {
 
-            return RunAction(gameId, () =>
-                _gameActions.TransferSoldiers(
+            return RunAction(
+                gameId,
+                () => _gameActions.TransferSoldiers(
                     gameId,
                     request.ExpectedVersion,
                     request.ActionId,
                     request.SourceCountryId,
                     request.DestinationCountryId,
-                    request.SoldierCount));
+                    request.SoldierCount,
+                    cancellationToken),
+                cancellationToken);
         }
 
         [HttpPost("{gameId:guid}/actions/combat/start")]
-        public ActionResult<GameState> StartCombat(Guid gameId, [FromBody] StartCombatActionRequest request) {
+        public Task<ActionResult<GameState>> StartCombat(
+            Guid gameId,
+            [FromBody] StartCombatActionRequest request,
+            CancellationToken cancellationToken) {
 
-            return RunAction(gameId, () =>
-                _gameActions.StartCombat(
+            return RunAction(
+                gameId,
+                () => _gameActions.StartCombat(
                     gameId,
                     request.ExpectedVersion,
                     request.ActionId,
                     request.SourceCountryId,
                     request.DestinationCountryId,
-                    request.SoldierCount));
+                    request.SoldierCount,
+                    cancellationToken),
+                cancellationToken);
         }
 
         [HttpPost("{gameId:guid}/actions/combat/roll")]
-        public ActionResult<GameState> RollCombat(Guid gameId, [FromBody] VersionedActionRequest request) {
+        public Task<ActionResult<GameState>> RollCombat(
+            Guid gameId,
+            [FromBody] VersionedActionRequest request,
+            CancellationToken cancellationToken) {
 
-            return RunAction(gameId, () =>
-                _gameActions.ResolveCombatRound(gameId, request.ExpectedVersion, request.ActionId));
+            return RunAction(
+                gameId,
+                () => _gameActions.ResolveCombatRound(
+                    gameId,
+                    request.ExpectedVersion,
+                    request.ActionId,
+                    cancellationToken),
+                cancellationToken);
         }
 
         [HttpPost("{gameId:guid}/actions/combat/retreat")]
-        public ActionResult<GameState> RetreatCombat(Guid gameId, [FromBody] VersionedActionRequest request) {
+        public Task<ActionResult<GameState>> RetreatCombat(
+            Guid gameId,
+            [FromBody] VersionedActionRequest request,
+            CancellationToken cancellationToken) {
 
-            return RunAction(gameId, () =>
-                _gameActions.RetreatCombat(gameId, request.ExpectedVersion, request.ActionId));
+            return RunAction(
+                gameId,
+                () => _gameActions.RetreatCombat(
+                    gameId,
+                    request.ExpectedVersion,
+                    request.ActionId,
+                    cancellationToken),
+                cancellationToken);
         }
 
         [HttpPost("{gameId:guid}/settings/npc-speed")]
-        public ActionResult<GameState> SetNpcSpeed(Guid gameId, [FromBody] SetNpcSpeedRequest request) {
+        public Task<ActionResult<GameState>> SetNpcSpeed(
+            Guid gameId,
+            [FromBody] SetNpcSpeedRequest request,
+            CancellationToken cancellationToken) {
 
-            return RunAction(gameId, () =>
-                _gameActions.SetNpcSpeed(gameId, request.ExpectedVersion, request.ActionId, request.NpcSpeed));
+            return RunAction(
+                gameId,
+                () => _gameActions.SetNpcSpeed(
+                    gameId,
+                    request.ExpectedVersion,
+                    request.ActionId,
+                    request.NpcSpeed,
+                    cancellationToken),
+                cancellationToken);
         }
 
-        private ActionResult<GameState> RunAction(Guid gameId, Func<GameState> action) {
+        private async Task<ActionResult<GameState>> RunAction(
+            Guid gameId,
+            Func<Task<GameState>> action,
+            CancellationToken cancellationToken) {
 
-            if (_gameStore.GetGame(gameId) == null) {
+            if (await _gameRepository.GetAsync(gameId, cancellationToken) == null) {
                 return NotFound("The requested game could not be found");
             }
 
+            if (!await _hostSessionService.IsHostAsync(Request, gameId, cancellationToken)) {
+                return StatusCode(StatusCodes.Status403Forbidden, "Only the host can change this game");
+            }
+
             try {
-                GameState game = action();
+                GameState game = await action();
                 return Ok(game);
             }
             catch (KeyNotFoundException) {

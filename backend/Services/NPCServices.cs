@@ -1,8 +1,8 @@
-using System.Collections.Concurrent;
 using Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Models;
+using Repositories;
 
 namespace Services;
 
@@ -135,40 +135,47 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
 public class NpcTurnHostedService : BackgroundService {
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly GameStore _gameStore;
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _gameLocks = new();
+    private readonly IGameRepository _gameRepository;
+    private readonly GameConcurrencyGate _concurrencyGate;
+    private readonly IGameStateNotifier _gameStateNotifier;
 
     private static readonly TimeSpan BaseDelay = TimeSpan.FromMilliseconds(750);
 
-    public NpcTurnHostedService(IServiceScopeFactory scopeFactory, GameStore gameStore) {
+    public NpcTurnHostedService(
+        IServiceScopeFactory scopeFactory,
+        IGameRepository gameRepository,
+        GameConcurrencyGate concurrencyGate,
+        IGameStateNotifier gameStateNotifier) {
         _scopeFactory = scopeFactory;
-        _gameStore = gameStore;
+        _gameRepository = gameRepository;
+        _concurrencyGate = concurrencyGate;
+        _gameStateNotifier = gameStateNotifier;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
 
         while (!stoppingToken.IsCancellationRequested) {
 
-            foreach (GameState game in _gameStore.GetAllGames()) {
+            await foreach (GameState snapshot in _gameRepository.GetAllAsync(stoppingToken)) {
 
-                if (game.Status != GameStatus.InProgress || game.CurrentFactionId == null) {
+                if (snapshot.Status != GameStatus.InProgress || snapshot.CurrentFactionId == null) {
                     continue;
                 }
 
-                Faction? current = game.Factions.FirstOrDefault(f => f.Id == game.CurrentFactionId);
+                Faction? current = snapshot.Factions.FirstOrDefault(f => f.Id == snapshot.CurrentFactionId);
 
                 if (current == null || current.Type != FactionType.NPC || current.IsDefeated) {
                     continue;
                 }
 
-                SemaphoreSlim gate = _gameLocks.GetOrAdd(game.Id, _ => new SemaphoreSlim(1, 1));
+                SemaphoreSlim gate = _concurrencyGate.Get(snapshot.Id);
 
                 if (!await gate.WaitAsync(0, stoppingToken)) {
                     continue;
                 }
 
                 try {
-                    await RunNpcTurn(game, current.Id, stoppingToken);
+                    await RunNpcTurn(snapshot.Id, current.Id, stoppingToken);
                 }
                 finally {
                     gate.Release();
@@ -179,7 +186,13 @@ public class NpcTurnHostedService : BackgroundService {
         }
     }
 
-    private async Task RunNpcTurn(GameState game, Guid npcFactionId, CancellationToken stoppingToken) {
+    private async Task RunNpcTurn(Guid gameId, Guid npcFactionId, CancellationToken stoppingToken) {
+
+        GameState? game = await _gameRepository.GetAsync(gameId, stoppingToken);
+
+        if (game == null) {
+            return;
+        }
 
         int speed = Math.Clamp(game.NpcSpeed, 1, 8);
         TimeSpan delay = TimeSpan.FromMilliseconds(BaseDelay.TotalMilliseconds / speed);
@@ -192,8 +205,17 @@ public class NpcTurnHostedService : BackgroundService {
 
         Guid startingFaction = game.CurrentFactionId ?? npcFactionId;
         TurnPhase startingPhase = game.CurrentPhase;
+        long versionAtStart = game.Version;
 
         policy.PlayTurn(game, npcFactionId, turnService, combatService);
+
+        if (game.Version > versionAtStart) {
+            bool saved = await _gameRepository.TryReplaceAsync(game, versionAtStart, stoppingToken);
+
+            if (saved) {
+                await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, stoppingToken);
+            }
+        }
 
         if (game.CurrentFactionId != startingFaction || game.CurrentPhase != startingPhase || game.ActiveCombat != null) {
             await Task.Delay(delay, stoppingToken);

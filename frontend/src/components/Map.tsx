@@ -12,11 +12,13 @@ import {
     rollCombat,
     startCombat,
 } from "../services/gameApi";
+import { connectGameHub } from "../services/gameHub";
 import { pointOnFeature } from "@turf/point-on-feature";
 import type { FeatureCollection } from "geojson";
 import CountryInfoPanel from "./CountryInfoPanel";
 import FactionPanel from "./FactionPanel";
 import PhaseControls from "./PhaseControls";
+import DiceOverlay from "./DiceOverlay";
 
 import type {
     CountryDefinition,
@@ -28,7 +30,11 @@ import { FactionType, TurnPhase } from "../types/game";
 
 setWorkerUrl(workerUrl);
 
-export default function Map() {
+type MapProps = {
+    initialGameId?: string | null;
+};
+
+export default function Map({ initialGameId = null }: MapProps) {
 
     // Stores a reference to the map container element
     // Maplibre requirees an ecisting HTML element to render into
@@ -67,9 +73,61 @@ export default function Map() {
     const [actionBusy, setActionBusy] = useState(false);
 
     const [error, setError] = useState<string | null>(null);
+    const [isHost, setIsHost] = useState(true);
 
     // Indicates that MapLibre has finished creating its map layers
     const [mapReady, setMapReady] = useState(false);
+
+    // spectate / refresh — pull the game if we landed on /game/:id
+    useEffect(() => {
+        if (!initialGameId) {
+            return;
+        }
+        let cancelled = false;
+        void getGame(initialGameId)
+            .then((loaded) => {
+                if (!cancelled) {
+                    setGame(loaded);
+                }
+            })
+            .catch((err) => {
+                if (!cancelled) {
+                    setError(err instanceof Error ? err.message : "Game not found");
+                }
+            });
+
+        void fetch(
+            `${import.meta.env.VITE_API_BASE_URL}/api/games/${encodeURIComponent(initialGameId)}/host-status`,
+            { credentials: "include" }
+        )
+            .then(async (response) => {
+                if (!response.ok) {
+                    return;
+                }
+                const body = (await response.json()) as { isHost?: boolean };
+                if (!cancelled) {
+                    setIsHost(Boolean(body.isHost));
+                }
+            })
+            .catch(() => undefined);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [initialGameId]);
+
+    // live updates when a game is up
+    useEffect(() => {
+        if (!game?.id) {
+            return;
+        }
+        const connection = connectGameHub(game.id, (next) => {
+            setGame(next);
+        });
+        return () => {
+            void connection.stop();
+        };
+    }, [game?.id]);
 
     useEffect(() => {
 
@@ -552,25 +610,6 @@ export default function Map() {
         };
     }, [game, mapReady, countryCentersReady]);
 
-    // poll while an NPC is up so the map keeps up without signalr yet
-    useEffect(() => {
-        if (!game) {
-            return;
-        }
-        const current = game.factions.find((f) => f.id === game.currentFactionId);
-        if (!current || current.type === FactionType.Human || game.status === 3) {
-            return;
-        }
-
-        const handle = window.setInterval(() => {
-            void getGame(game.id)
-                .then((next) => setGame(next))
-                .catch(() => undefined);
-        }, 800);
-
-        return () => window.clearInterval(handle);
-    }, [game]);
-
     async function runGameAction(action: () => Promise<GameState>) {
         if (!game || actionBusy) {
             return;
@@ -625,9 +664,13 @@ export default function Map() {
     
             // Store the game returned by the backend
             setGame(result.game);
+            setIsHost(true);
     
             // Retain the initial D20 results for future animations
             setTurnOrderRolls(result.turnOrderRolls);
+
+            // stable shareable URL for spectators
+            window.history.pushState({}, "", `/game/${result.game.id}`);
     
             console.log("Game created successfully:", result.game.id);
         }
@@ -746,6 +789,10 @@ export default function Map() {
             )}
 
             {game && (
+                <DiceOverlay combat={game.activeCombat} turnOrderRolls={turnOrderRolls} />
+            )}
+
+            {game && isHost && (
                 <PhaseControls
                     game={game}
                     busy={actionBusy}
@@ -784,6 +831,49 @@ export default function Map() {
                         )
                     }
                 />
+            )}
+
+            {game && !isHost && (
+                <div
+                    style={{
+                        position: "absolute",
+                        left: 20,
+                        bottom: 20,
+                        zIndex: 15,
+                        background: "#111827",
+                        color: "#F9FAFB",
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                    }}
+                >
+                    Spectating — read only
+                </div>
+            )}
+
+            {game && isHost && (
+                <button
+                    type="button"
+                    onClick={() => {
+                        void navigator.clipboard.writeText(
+                            `${window.location.origin}/game/${game.id}`
+                        );
+                    }}
+                    style={{
+                        position: "absolute",
+                        top: 20,
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        zIndex: 16,
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "none",
+                        background: "#0F172A",
+                        color: "#fff",
+                        cursor: "pointer",
+                    }}
+                >
+                    Copy spectator link
+                </button>
             )}
 
             {error && (

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Models;
+using Repositories;
 
 namespace Services;
 
@@ -14,106 +16,192 @@ public class GameVersionConflictException : Exception {
     public long ActualVersion { get; }
 }
 
-// ---- Version checks + actionId idempotency (in-memory for now) ----
 public class GameActionService {
 
     private readonly ConcurrentDictionary<string, GameState> _completedActions = new();
-    private readonly GameStore _gameStore;
+    private readonly IGameRepository _gameRepository;
+    private readonly IGameEventRepository _gameEventRepository;
+    private readonly IGameStateNotifier _gameStateNotifier;
+    private readonly GameConcurrencyGate _concurrencyGate;
     private readonly TurnService _turnService;
     private readonly CombatService _combatService;
 
     public GameActionService(
-        GameStore gameStore,
+        IGameRepository gameRepository,
+        IGameEventRepository gameEventRepository,
+        IGameStateNotifier gameStateNotifier,
+        GameConcurrencyGate concurrencyGate,
         TurnService turnService,
         CombatService combatService) {
 
-        _gameStore = gameStore;
+        _gameRepository = gameRepository;
+        _gameEventRepository = gameEventRepository;
+        _gameStateNotifier = gameStateNotifier;
+        _concurrencyGate = concurrencyGate;
         _turnService = turnService;
         _combatService = combatService;
     }
 
-    public GameState AdvancePhase(Guid gameId, long expectedVersion, string? actionId) {
+    public Task<GameState> AdvancePhase(
+        Guid gameId,
+        long expectedVersion,
+        string? actionId,
+        CancellationToken cancellationToken = default) {
 
-        return Execute(gameId, expectedVersion, actionId, game => {
-            Guid actorId = RequireCurrentFaction(game);
-            _turnService.AdvancePhase(game, actorId);
-        });
+        return ExecuteAsync(
+            gameId,
+            expectedVersion,
+            actionId,
+            "AdvancePhase",
+            game => {
+                Guid actorId = RequireCurrentFaction(game);
+                _turnService.AdvancePhase(game, actorId);
+            },
+            cancellationToken);
     }
 
-    public GameState AllocateReinforcements(
+    public Task<GameState> AllocateReinforcements(
         Guid gameId,
         long expectedVersion,
         string? actionId,
         string countryId,
-        int soldierCount) {
+        int soldierCount,
+        CancellationToken cancellationToken = default) {
 
-        return Execute(gameId, expectedVersion, actionId, game => {
-            Guid actorId = RequireCurrentFaction(game);
-            _turnService.AllocateReinforcements(game, actorId, countryId, soldierCount);
-        });
+        return ExecuteAsync(
+            gameId,
+            expectedVersion,
+            actionId,
+            "AllocateReinforcements",
+            game => {
+                Guid actorId = RequireCurrentFaction(game);
+                _turnService.AllocateReinforcements(game, actorId, countryId, soldierCount);
+            },
+            cancellationToken);
     }
 
-    public GameState TransferSoldiers(
+    public Task<GameState> TransferSoldiers(
         Guid gameId,
         long expectedVersion,
         string? actionId,
         string sourceCountryId,
         string destinationCountryId,
-        int soldierCount) {
+        int soldierCount,
+        CancellationToken cancellationToken = default) {
 
-        return Execute(gameId, expectedVersion, actionId, game => {
-            Guid actorId = RequireCurrentFaction(game);
-            _turnService.TransferSoldiers(game, actorId, sourceCountryId, destinationCountryId, soldierCount);
-        });
+        return ExecuteAsync(
+            gameId,
+            expectedVersion,
+            actionId,
+            "TransferSoldiers",
+            game => {
+                Guid actorId = RequireCurrentFaction(game);
+                _turnService.TransferSoldiers(
+                    game,
+                    actorId,
+                    sourceCountryId,
+                    destinationCountryId,
+                    soldierCount);
+            },
+            cancellationToken);
     }
 
-    public GameState StartCombat(
+    public Task<GameState> StartCombat(
         Guid gameId,
         long expectedVersion,
         string? actionId,
         string sourceCountryId,
         string destinationCountryId,
-        int soldierCount) {
+        int soldierCount,
+        CancellationToken cancellationToken = default) {
 
-        return Execute(gameId, expectedVersion, actionId, game => {
-            Guid actorId = RequireCurrentFaction(game);
-            _combatService.StartCombat(game, actorId, sourceCountryId, destinationCountryId, soldierCount);
-        });
+        return ExecuteAsync(
+            gameId,
+            expectedVersion,
+            actionId,
+            "StartCombat",
+            game => {
+                Guid actorId = RequireCurrentFaction(game);
+                _combatService.StartCombat(
+                    game,
+                    actorId,
+                    sourceCountryId,
+                    destinationCountryId,
+                    soldierCount);
+            },
+            cancellationToken);
     }
 
-    public GameState ResolveCombatRound(Guid gameId, long expectedVersion, string? actionId) {
+    public Task<GameState> ResolveCombatRound(
+        Guid gameId,
+        long expectedVersion,
+        string? actionId,
+        CancellationToken cancellationToken = default) {
 
-        return Execute(gameId, expectedVersion, actionId, game => {
-            Guid actorId = RequireCurrentFaction(game);
-            _combatService.ResolveNextRound(game, actorId);
-        });
+        return ExecuteAsync(
+            gameId,
+            expectedVersion,
+            actionId,
+            "ResolveCombatRound",
+            game => {
+                Guid actorId = RequireCurrentFaction(game);
+                _combatService.ResolveNextRound(game, actorId);
+            },
+            cancellationToken);
     }
 
-    public GameState RetreatCombat(Guid gameId, long expectedVersion, string? actionId) {
+    public Task<GameState> RetreatCombat(
+        Guid gameId,
+        long expectedVersion,
+        string? actionId,
+        CancellationToken cancellationToken = default) {
 
-        return Execute(gameId, expectedVersion, actionId, game => {
-            Guid actorId = RequireCurrentFaction(game);
-            _combatService.Retreat(game, actorId);
-        });
+        return ExecuteAsync(
+            gameId,
+            expectedVersion,
+            actionId,
+            "RetreatCombat",
+            game => {
+                Guid actorId = RequireCurrentFaction(game);
+                _combatService.Retreat(game, actorId);
+            },
+            cancellationToken);
     }
 
-    public GameState SetNpcSpeed(Guid gameId, long expectedVersion, string? actionId, int npcSpeed) {
+    public Task<GameState> SetNpcSpeed(
+        Guid gameId,
+        long expectedVersion,
+        string? actionId,
+        int npcSpeed,
+        CancellationToken cancellationToken = default) {
 
-        return Execute(gameId, expectedVersion, actionId, game => {
+        return ExecuteAsync(
+            gameId,
+            expectedVersion,
+            actionId,
+            "SetNpcSpeed",
+            game => {
 
-            if (npcSpeed < 1 || npcSpeed > 8) {
-                throw new ArgumentOutOfRangeException(
-                    nameof(npcSpeed),
-                    "NPC speed must be between 1 and 8"
-                );
-            }
+                if (npcSpeed < 1 || npcSpeed > 8) {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(npcSpeed),
+                        "NPC speed must be between 1 and 8"
+                    );
+                }
 
-            game.NpcSpeed = npcSpeed;
-            game.Version++;
-        });
+                game.NpcSpeed = npcSpeed;
+                game.Version++;
+            },
+            cancellationToken);
     }
 
-    private GameState Execute(Guid gameId, long expectedVersion, string? actionId, Action<GameState> mutate) {
+    private async Task<GameState> ExecuteAsync(
+        Guid gameId,
+        long expectedVersion,
+        string? actionId,
+        string eventType,
+        Action<GameState> mutate,
+        CancellationToken cancellationToken) {
 
         string? idempotencyKey = BuildIdempotencyKey(gameId, actionId);
 
@@ -121,20 +209,66 @@ public class GameActionService {
             return cached;
         }
 
-        GameState? game = _gameStore.GetGame(gameId)
-            ?? throw new KeyNotFoundException("The requested game could not be found");
+        SemaphoreSlim gate = _concurrencyGate.Get(gameId);
+        await gate.WaitAsync(cancellationToken);
 
-        if (game.Version != expectedVersion) {
-            throw new GameVersionConflictException(expectedVersion, game.Version);
+        try {
+
+            if (idempotencyKey != null && _completedActions.TryGetValue(idempotencyKey, out cached)) {
+                return cached;
+            }
+
+            GameState? game = await _gameRepository.GetAsync(gameId, cancellationToken)
+                ?? throw new KeyNotFoundException("The requested game could not be found");
+
+            if (game.Version != expectedVersion) {
+                throw new GameVersionConflictException(expectedVersion, game.Version);
+            }
+
+            mutate(game);
+
+            bool saved = await _gameRepository.TryReplaceAsync(game, expectedVersion, cancellationToken);
+
+            if (!saved) {
+                GameState? current = await _gameRepository.GetAsync(gameId, cancellationToken);
+                throw new GameVersionConflictException(expectedVersion, current?.Version ?? -1);
+            }
+
+            await AppendEventAsync(gameId, actionId, eventType, game, cancellationToken);
+            await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, cancellationToken);
+
+            if (idempotencyKey != null) {
+                _completedActions[idempotencyKey] = game;
+            }
+
+            return game;
         }
-
-        mutate(game);
-
-        if (idempotencyKey != null) {
-            _completedActions[idempotencyKey] = game;
+        finally {
+            gate.Release();
         }
+    }
 
-        return game;
+    private async Task AppendEventAsync(
+        Guid gameId,
+        string? actionId,
+        string eventType,
+        GameState game,
+        CancellationToken cancellationToken) {
+
+        string payloadJson = JsonSerializer.Serialize(new {
+            actionId,
+            version = game.Version,
+        });
+
+        GameEvent gameEvent = new() {
+            GameId = gameId,
+            EventId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString("N") : actionId.Trim(),
+            Type = eventType,
+            OccurredAtUtc = DateTime.UtcNow,
+            PayloadJson = payloadJson,
+        };
+
+        await _gameEventRepository.AppendAsync(gameEvent, cancellationToken);
     }
 
     private static Guid RequireCurrentFaction(GameState game) {

@@ -1,4 +1,5 @@
 using Enums;
+using MongoDB.Bson.Serialization.Attributes;
 
 namespace Models;
 
@@ -10,6 +11,7 @@ public class GameState {
 
     // will be used to track the current game session
     // TODO
+    [BsonId]
     public Guid Id {get; set;} = Guid.NewGuid();
 
     // Indicates the state that the game is currently in
