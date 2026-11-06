@@ -35,9 +35,9 @@ export default function Map() {
 
     const troopMarkersRef = useRef<Marker[]>([]);
 
-    const countryCentersRef = useRef<Map<string, [number, number]>>(
-        new Map()
-    );
+    // plain object on purpose — naming this Map() shadows JS Map and breaks new Map()
+    type LngLatPair = [number, number];
+    const countryCentersRef = useRef<Record<string, LngLatPair>>({});
 
     const [countryCentersReady, setCountryCentersReady] = useState(false);
 
@@ -213,55 +213,48 @@ export default function Map() {
                 // Retrieve the first country found, if one exists
                 const country = features[0];
 
-                // Remove the highlight from the previously selected country.
+                // If no country was clicked, clear the selection.
+                if (!country || country.id == null) {
+                    if (previousSelectionRef.current !== null) {
+                        currentMap.setFeatureState(
+                            {
+                                source: "countries",
+                                id: previousSelectionRef.current,
+                            },
+                            { selected: false }
+                        );
+                    }
+                    previousSelectionRef.current = null;
+                    setSelectedCountry(null);
+                    return;
+                }
+
+                const countryId = String(country.id);
+                const countryName = String(
+                    country.properties?.name ?? countryId
+                );
+
                 if (previousSelectionRef.current !== null) {
                     currentMap.setFeatureState(
                         {
                             source: "countries",
                             id: previousSelectionRef.current,
                         },
-                        {
-                            selected: false,
-                        }
+                        { selected: false }
                     );
                 }
 
-                // If no country was clicked, clear the selection.
-                if (!country || country.id == null) {
-
-                    // Clear the stored country ID
-                    previousSelectionRef.current = null;
-
-                    // Hide the country information panel
-                    setSelectedCountry(null);
-
-                    return;
-                }
-
-                // Get  the selected country's ID and name
-                const countryId = country.id;
-
-                const countryName = String(
-                    country.properties?.name ?? countryId
-                );
-
-                // Highlight the new selected country
                 currentMap.setFeatureState(
                     {
                         source: "countries",
                         id: countryId,
                     },
-                    {
-                        selected: true,
-                    }
+                    { selected: true }
                 );
 
-                // Store the new selected country ID
                 previousSelectionRef.current = countryId;
-
-                // Display the selected country's information panel
                 setSelectedCountry({
-                    id: String(countryId),
+                    id: countryId,
                     name: countryName,
                 });
             });
@@ -271,13 +264,74 @@ export default function Map() {
         // Cleanuo function to remove the map when the component unmounts
         // React in strict mode may try to run additional satup and cleanup cycles to detect lifecycle problems so this clean up function is important to avoid issues
         return () => {
+            for (const marker of troopMarkersRef.current) {
+                marker.remove();
+            }
+            troopMarkersRef.current = [];
 
             // Removes the map instance
             map.current?.remove();
             // Clear the map reference so a new map can be created when nessasary
             map.current = null;
+            setMapReady(false);
         };
     }, []);
+
+    // -------------------------------------------------------------------------
+    // selectCountry — shared so map clicks and faction fly-to dont fight each other
+    // -------------------------------------------------------------------------
+    function selectCountry(countryId: string, countryName?: string) {
+        const currentMap = map.current;
+        if (!currentMap) {
+            return;
+        }
+
+        if (previousSelectionRef.current !== null) {
+            currentMap.setFeatureState(
+                {
+                    source: "countries",
+                    id: previousSelectionRef.current,
+                },
+                { selected: false }
+            );
+        }
+
+        currentMap.setFeatureState(
+            {
+                source: "countries",
+                id: countryId,
+            },
+            { selected: true }
+        );
+
+        previousSelectionRef.current = countryId;
+        setSelectedCountry({
+            id: countryId,
+            name: countryName ?? countryId,
+        });
+    }
+
+    function flyToCountry(countryId: string, countryName: string) {
+        const currentMap = map.current;
+        const coords = countryCentersRef.current[countryId];
+
+        selectCountry(countryId, countryName);
+
+        if (!currentMap || !coords) {
+            console.warn(`No map coordinates for ${countryId}`);
+            return;
+        }
+
+        const prefersReducedMotion =
+            typeof window !== "undefined" &&
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        currentMap.flyTo({
+            center: coords,
+            zoom: Math.max(currentMap.getZoom(), 3.5),
+            duration: prefersReducedMotion ? 0 : 1200,
+        });
+    }
 
 
     useEffect(() => {
@@ -302,7 +356,7 @@ export default function Map() {
                     await response.json() as FeatureCollection;
     
                 // Dictionary mapping ISO country IDs to longitude/latitude
-                const centers = new Map<string, [number, number]>();
+                const centers: Record<string, LngLatPair> = {};
     
                 // Loop through the geographic features.
                 for (const feature of geoJson.features) {
@@ -324,14 +378,23 @@ export default function Map() {
                     ) {
                         continue;
                     }
+
+                    // first valid feature wins — keep it deterministic
+                    if (centers[countryId]) {
+                        continue;
+                    }
     
                     // Calculate a point located on the country's geometry
                     const point = pointOnFeature(feature);
     
                     const [longitude, latitude] = point.geometry.coordinates;
+
+                    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+                        continue;
+                    }
     
                     // Store the geographic location for later use
-                    centers.set(countryId, [longitude, latitude]);
+                    centers[countryId] = [longitude, latitude];
                 }
     
                 // Only update state if the request wasn't cancelled
@@ -404,6 +467,76 @@ export default function Map() {
         }
     
     }, [game, mapReady]);
+
+
+    // -------------------------------------------------------------------------
+    // Troop markers — only the ten active territories, not every catalogue country
+    // -------------------------------------------------------------------------
+    useEffect(() => {
+        const currentMap = map.current;
+
+        for (const marker of troopMarkersRef.current) {
+            marker.remove();
+        }
+        troopMarkersRef.current = [];
+
+        if (!currentMap || !mapReady || !game || !countryCentersReady) {
+            return;
+        }
+
+        for (const territory of game.territories) {
+            const coords = countryCentersRef.current[territory.countryId];
+            if (!coords) {
+                console.warn(
+                    `Missing coordinates for troop marker: ${territory.countryId}`
+                );
+                continue;
+            }
+
+            const owner = game.factions.find(
+                faction => faction.id === territory.ownerFactionId
+            );
+            const color = owner?.color ?? "#444444";
+
+            const element = document.createElement("div");
+            element.textContent = String(territory.soldiers);
+            element.title = `${territory.name}: ${territory.soldiers} soldiers`;
+            element.setAttribute(
+                "aria-label",
+                `${territory.name}: ${territory.soldiers} soldiers`
+            );
+            Object.assign(element.style, {
+                minWidth: "28px",
+                height: "28px",
+                padding: "0 6px",
+                borderRadius: "999px",
+                backgroundColor: color,
+                color: "#FFFFFF",
+                border: "2px solid #FFFFFF",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.35)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "12px",
+                fontWeight: "700",
+                pointerEvents: "none",
+                userSelect: "none",
+            });
+
+            const marker = new Marker({ element, anchor: "center" })
+                .setLngLat(coords)
+                .addTo(currentMap);
+
+            troopMarkersRef.current.push(marker);
+        }
+
+        return () => {
+            for (const marker of troopMarkersRef.current) {
+                marker.remove();
+            }
+            troopMarkersRef.current = [];
+        };
+    }, [game, mapReady, countryCentersReady]);
 
 
     async function handleCreateGame() {
@@ -643,9 +776,30 @@ export default function Map() {
                                     <p>Total Soldiers: {totalSoldiers}</p>
 
                                     {ownedTerritories.map(territory => (
-                                        <p key={territory.countryId}>
+                                        <button
+                                            key={territory.countryId}
+                                            type="button"
+                                            onClick={() =>
+                                                flyToCountry(
+                                                    territory.countryId,
+                                                    territory.name
+                                                )
+                                            }
+                                            style={{
+                                                display: "block",
+                                                width: "100%",
+                                                textAlign: "left",
+                                                margin: "4px 0",
+                                                padding: "4px 6px",
+                                                border: "1px solid #DDDDDD",
+                                                borderRadius: 4,
+                                                background: "#F7F7F7",
+                                                color: "#111111",
+                                                cursor: "pointer",
+                                            }}
+                                        >
                                             {territory.name}: {territory.soldiers}
-                                        </p>
+                                        </button>
                                     ))}
                                 </div>
                             );
