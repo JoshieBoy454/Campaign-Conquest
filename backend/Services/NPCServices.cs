@@ -282,7 +282,7 @@ public class NpcTurnHostedService : BackgroundService {
             return;
         }
 
-        int baseDelayMs = _configuration.GetValue("Npc:BaseDelayMs", 800);
+        int baseDelayMs = _configuration.GetValue("Npc:BaseDelayMs", 1400);
         int speed = Math.Clamp(game.NpcSpeed, 1, 8);
         TimeSpan delay = TimeSpan.FromMilliseconds(Math.Max(100, baseDelayMs) / (double)speed);
 

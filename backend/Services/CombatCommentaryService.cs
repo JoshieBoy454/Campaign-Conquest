@@ -35,7 +35,7 @@ public class GeminiCombatCommentaryService(
         string? apiKey = configuration["LLM:ApiKey"];
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return null;
+            return FactualLine(context);
         }
 
         string model = configuration["LLM:Model"] ?? "gemini-2.0-flash";
@@ -77,7 +77,7 @@ public class GeminiCombatCommentaryService(
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogWarning("Gemini commentary failed: {Status}", response.StatusCode);
-                return null;
+                return FactualLine(context);
             }
 
             using JsonDocument doc = JsonDocument.Parse(
@@ -92,7 +92,7 @@ public class GeminiCombatCommentaryService(
 
             if (string.IsNullOrWhiteSpace(text) || text.Length > 800)
             {
-                return null;
+                return FactualLine(context);
             }
 
             return text.Trim();
@@ -100,8 +100,17 @@ public class GeminiCombatCommentaryService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Gemini commentary blew up — gameplay continues");
-            return null;
+            return FactualLine(context);
         }
+    }
+
+    private static string FactualLine(CombatCommentaryContext context)
+    {
+        string attackerDice = string.Join(",", context.AttackerDice);
+        string defenderDice = string.Join(",", context.DefenderDice);
+        string end = context.BattleFinished ? " Battle resolved." : "";
+        return $"{context.AttackerCountry} rolls [{attackerDice}] vs {context.DefenderCountry} [{defenderDice}]; " +
+               $"losses {context.AttackerCasualties}/{context.DefenderCasualties}.{end}";
     }
 }
 

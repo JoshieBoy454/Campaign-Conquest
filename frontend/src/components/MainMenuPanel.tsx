@@ -7,6 +7,9 @@ type Props = {
     onSpectate: (gameId: string) => void;
 };
 
+const GUID_RE =
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 export default function MainMenuPanel({
     playerName,
     onPlayerNameChange,
@@ -14,6 +17,7 @@ export default function MainMenuPanel({
     onSpectate,
 }: Props) {
     const [spectateId, setSpectateId] = useState("");
+    const [spectateError, setSpectateError] = useState<string | null>(null);
     const canPlay = playerName.trim().length > 0;
 
     return (
@@ -73,7 +77,18 @@ export default function MainMenuPanel({
                         onSubmit={(e) => {
                             e.preventDefault();
                             const id = spectateId.trim();
-                            if (id) onSpectate(id);
+                            if (!id) {
+                                setSpectateError("Enter a game id.");
+                                return;
+                            }
+                            if (!GUID_RE.test(id)) {
+                                setSpectateError(
+                                    "Game id looks invalid — paste the full spectator id."
+                                );
+                                return;
+                            }
+                            setSpectateError(null);
+                            onSpectate(id);
                         }}
                         style={{ display: "flex", gap: 8 }}
                     >
@@ -82,12 +97,23 @@ export default function MainMenuPanel({
                             name="gameId"
                             placeholder="Spectate game id"
                             value={spectateId}
-                            onChange={(e) => setSpectateId(e.target.value)}
+                            onChange={(e) => {
+                                setSpectateId(e.target.value);
+                                setSpectateError(null);
+                            }}
                         />
                         <button type="submit" className="holo-btn">
                             Watch
                         </button>
                     </form>
+                    {spectateError && (
+                        <p
+                            className="holo-muted"
+                            style={{ color: "#ff4d6d", marginTop: 8, fontSize: 12 }}
+                        >
+                            {spectateError}
+                        </p>
+                    )}
                 </div>
             </div>
         </div>

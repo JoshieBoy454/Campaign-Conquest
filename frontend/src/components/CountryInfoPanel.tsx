@@ -10,9 +10,6 @@ type Props = {
     onCreateGame: () => void;
 };
 
-// -------------------------------------------------------------------------
-// CountryInfoPanel — selected country details + Start Game
-// -------------------------------------------------------------------------
 export default function CountryInfoPanel({
     selectedCountry,
     selectedCountryData,
@@ -22,65 +19,92 @@ export default function CountryInfoPanel({
     isCreatingGame,
     onCreateGame,
 }: Props) {
+    const canStart = Boolean(selectedCountryData) && !isCreatingGame;
+
     return (
         <div>
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+            <h3 style={{ marginTop: 0, marginBottom: 10, fontSize: 16 }}>
                 {selectedCountry.name}
             </h3>
 
             {!gameExists && selectedCountryData && (
-                <>
-                    <p style={{ margin: "4px 0" }}>
-                        Population:{" "}
-                        {selectedCountryData.population.toLocaleString()}
-                    </p>
-                    <p style={{ margin: "4px 0" }}>
-                        Starting armies: {selectedCountryData.soldierValue}
-                    </p>
-                </>
+                <div className="holo-muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                    Pop {selectedCountryData.population.toLocaleString()} ·{" "}
+                    {selectedCountryData.soldierValue} starting armies
+                </div>
             )}
 
             {gameExists && selectedTerritory && (
-                <>
-                    <p style={{ margin: "4px 0" }}>
-                        Owner: {selectedOwner?.name ?? "—"}
-                    </p>
-                    <p style={{ margin: "4px 0" }}>
-                        Soldiers: {selectedTerritory.soldiers}
-                    </p>
-                </>
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        marginBottom: 6,
+                    }}
+                >
+                    <span
+                        style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            fontSize: 13,
+                        }}
+                    >
+                        <span
+                            aria-hidden
+                            style={{
+                                width: 12,
+                                height: 12,
+                                borderRadius: 2,
+                                background: selectedOwner?.color ?? "#666",
+                                boxShadow: "0 0 6px rgba(46,230,255,0.35)",
+                            }}
+                        />
+                        {selectedOwner?.name ?? "—"}
+                    </span>
+                    <span
+                        style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            fontSize: 13,
+                            color: "var(--holo-accent)",
+                            fontWeight: 700,
+                        }}
+                        title="Soldiers"
+                    >
+                        <span aria-hidden style={{ opacity: 0.85 }}>
+                            ▣
+                        </span>
+                        {selectedTerritory.soldiers}
+                    </span>
+                </div>
             )}
 
             {gameExists && !selectedTerritory && (
-                <p style={{ margin: "4px 0", opacity: 0.7 }}>
-                    Not in this campaign (only 10 countries are in play).
+                <p className="holo-muted" style={{ margin: "4px 0", fontSize: 12 }}>
+                    Not in this campaign.
                 </p>
             )}
 
             {!gameExists && (
                 <button
                     type="button"
+                    className="holo-btn holo-btn-primary"
                     onClick={onCreateGame}
-                    disabled={!selectedCountryData || isCreatingGame}
-                    style={{
-                        marginTop: 10,
-                        padding: "10px 14px",
-                        borderRadius: 6,
-                        border: "none",
-                        backgroundColor: "#1160BF",
-                        color: "#FFFFFF",
-                        cursor: "pointer",
-                        opacity: !selectedCountryData || isCreatingGame ? 0.5 : 1,
-                    }}
+                    disabled={!canStart}
+                    style={{ marginTop: 10, width: "100%" }}
                 >
                     {isCreatingGame
-                        ? "Creating Game..."
+                        ? "Creating…"
                         : selectedCountryData
                           ? "Start Game"
-                          : "Country Unavailable"}
+                          : "Select a playable country"}
                 </button>
             )}
         </div>
     );
 }
+
 //-----------------------------------------------------------------End of File----------------------------------------------------------------->

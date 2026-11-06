@@ -1,13 +1,8 @@
-import { useEffect, useState } from "react";
-import { apiUrl } from "../services/apiBase";
-
-type GameEventRow = {
-    eventId: string;
-    sequence?: number;
-    type: string;
-    occurredAtUtc: string;
-    payloadJson?: string;
-};
+import { useEffect, useRef, useState } from "react";
+import {
+    fetchEventsAfter,
+    type GameEventRow,
+} from "../services/gameEvents";
 
 type Props = { gameId: string };
 
@@ -49,38 +44,44 @@ function detailFor(event: GameEventRow): string | null {
 
 export default function ActionLog({ gameId }: Props) {
     const [events, setEvents] = useState<GameEventRow[]>([]);
-    const [after, setAfter] = useState(0);
+    const [error, setError] = useState<string | null>(null);
+    const afterRef = useRef(0);
+
+    useEffect(() => {
+        afterRef.current = 0;
+        setEvents([]);
+        setError(null);
+    }, [gameId]);
 
     useEffect(() => {
         let cancelled = false;
 
         async function load() {
-            try {
-                const response = await fetch(
-                    apiUrl(
-                        `/api/games/${encodeURIComponent(gameId)}/events?afterSequence=${after}&limit=100`
-                    ),
-                    { credentials: "include" }
-                );
-                if (!response.ok) return;
-                const rows = (await response.json()) as GameEventRow[];
-                if (cancelled || rows.length === 0) return;
-                const maxSeq = Math.max(
-                    after,
-                    ...rows.map((r) => r.sequence ?? 0)
-                );
-                setAfter(maxSeq);
-                setEvents((prev) => {
-                    const seen = new Set(prev.map((e) => e.eventId));
-                    const merged = [
-                        ...prev,
-                        ...rows.filter((r) => !seen.has(r.eventId)),
-                    ];
-                    return merged.slice(-60);
-                });
-            } catch {
-                /* ignore */
+            const { rows, error: fetchError } = await fetchEventsAfter(
+                gameId,
+                afterRef.current,
+                100
+            );
+            if (cancelled) return;
+            if (fetchError) {
+                setError(fetchError);
+                return;
             }
+            setError(null);
+            if (rows.length === 0) return;
+            const maxSeq = Math.max(
+                afterRef.current,
+                ...rows.map((r) => r.sequence)
+            );
+            afterRef.current = maxSeq;
+            setEvents((prev) => {
+                const seen = new Set(prev.map((e) => e.eventId));
+                const merged = [
+                    ...prev,
+                    ...rows.filter((r) => !seen.has(r.eventId)),
+                ];
+                return merged.slice(-60);
+            });
         }
 
         void load();
@@ -89,36 +90,41 @@ export default function ActionLog({ gameId }: Props) {
             cancelled = true;
             window.clearInterval(handle);
         };
-    }, [gameId, after]);
+    }, [gameId]);
 
     return (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {events.map((event) => (
-                <li
-                    key={event.eventId}
-                    style={{
-                        borderBottom: "1px solid var(--holo-border-dim)",
-                        padding: "4px 0",
-                    }}
-                >
-                    <div style={{ fontWeight: 600 }}>
-                        {FRIENDLY[event.type] ?? event.type}
-                    </div>
-                    {(() => {
-                        const detail = detailFor(event);
-                        return detail ? (
+        <ul className="holo-scroll" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {error && (
+                <li className="holo-muted" style={{ color: "var(--holo-danger)" }}>
+                    {error}
+                </li>
+            )}
+            {events.map((event) => {
+                const detail = detailFor(event);
+                return (
+                    <li
+                        key={event.eventId}
+                        style={{
+                            borderBottom: "1px solid var(--holo-border-dim)",
+                            padding: "4px 0",
+                        }}
+                    >
+                        <div style={{ fontWeight: 600 }}>
+                            {FRIENDLY[event.type] ?? event.type}
+                        </div>
+                        {detail && (
                             <div className="holo-muted" style={{ fontSize: 11 }}>
                                 {detail}
                             </div>
-                        ) : null;
-                    })()}
-                    <div className="holo-muted" style={{ fontSize: 11 }}>
-                        {new Date(event.occurredAtUtc).toLocaleTimeString()}
-                    </div>
-                </li>
-            ))}
-            {events.length === 0 && (
-                <li className="holo-muted">No moves yet.</li>
+                        )}
+                        <div className="holo-muted" style={{ fontSize: 11 }}>
+                            {new Date(event.occurredAtUtc).toLocaleTimeString()}
+                        </div>
+                    </li>
+                );
+            })}
+            {!error && events.length === 0 && (
+                <li className="holo-muted">Waiting for the first action…</li>
             )}
         </ul>
     );

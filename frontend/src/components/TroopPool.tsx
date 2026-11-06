@@ -1,4 +1,4 @@
-import { FactionType, TurnPhase, type GameState } from "../types/game";
+import { FactionType, type GameState } from "../types/game";
 
 type Props = {
     game: GameState;
@@ -41,7 +41,11 @@ export default function TroopPool({
                             className="holo-tab"
                             style={{
                                 padding: "2px 8px",
-                                opacity: presentationSpeed === 1 ? 1 : 0.5,
+                                opacity: presentationSpeed === 1 ? 1 : 0.45,
+                                boxShadow:
+                                    presentationSpeed === 1
+                                        ? "0 0 8px rgba(46,230,255,0.45)"
+                                        : undefined,
                             }}
                             onClick={() => onSpeedChange(1)}
                         >
@@ -52,7 +56,11 @@ export default function TroopPool({
                             className="holo-tab"
                             style={{
                                 padding: "2px 8px",
-                                opacity: presentationSpeed === 2 ? 1 : 0.5,
+                                opacity: presentationSpeed === 2 ? 1 : 0.45,
+                                boxShadow:
+                                    presentationSpeed === 2
+                                        ? "0 0 8px rgba(46,230,255,0.45)"
+                                        : undefined,
                             }}
                             onClick={() => onSpeedChange(2)}
                             disabled={isHuman}
@@ -79,23 +87,14 @@ export default function TroopPool({
                         <div className="holo-muted" style={{ fontSize: 11 }}>
                             Available to place
                         </div>
-                        <div style={{ fontSize: 28, fontWeight: 800, color: "var(--holo-accent)" }}>
+                        <div
+                            style={{
+                                fontSize: 28,
+                                fontWeight: 800,
+                                color: "var(--holo-accent)",
+                            }}
+                        >
                             {game.reinforcementPool}
-                        </div>
-                    </div>
-                    <div className="holo-muted" style={{ textAlign: "right", fontSize: 12 }}>
-                        {isHuman ? "Your turn" : `${current?.name ?? "NPC"} operating`}
-                        <div>
-                            Phase{" "}
-                            {game.currentPhase === TurnPhase.Upkeep
-                                ? "Upkeep"
-                                : game.currentPhase === TurnPhase.ReinforcementOne
-                                  ? "Reinforce"
-                                  : game.currentPhase === TurnPhase.Combat
-                                    ? "Combat"
-                                    : game.currentPhase === TurnPhase.ReinforcementTwo
-                                      ? "Post-combat"
-                                      : "End"}
                         </div>
                     </div>
                 </div>

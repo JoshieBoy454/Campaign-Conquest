@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Map as MapLibreMap, Marker, setWorkerUrl } from "maplibre-gl";
+import { Map as MapLibreMap, setWorkerUrl } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -29,6 +29,7 @@ import PixiArmyLayer from "./PixiArmyLayer";
 import GameEndOverlay from "./GameEndOverlay";
 import HoloPanel from "./holo/HoloPanel";
 import TroopPool from "./TroopPool";
+import RulesPanel from "./RulesPanel";
 import {
     addCountryLayers,
     loadCountryGeoJson,
@@ -61,13 +62,15 @@ export default function Map({
     const geoRef = useRef<FeatureCollection | null>(null);
     const catalogueIsosRef = useRef<Set<string>>(new Set());
     const previousSelectionRef = useRef<string | number | null>(null);
-    const troopMarkersRef = useRef<Marker[]>([]);
     const countryCentersRef = useRef<Record<string, LngLatPair>>({});
     const driftTimerRef = useRef<number | null>(null);
     const dragRef = useRef<{
         sourceId: string;
-        start: { x: number; y: number };
+        startLngLat: LngLatPair;
+        endLngLat: LngLatPair;
+        valid: boolean;
     } | null>(null);
+    const [rulesOpen, setRulesOpen] = useState(false);
 
     const [selectedCountry, setSelectedCountry] = useState<{
         id: string | number;
@@ -78,7 +81,8 @@ export default function Map({
     const [isCreatingGame, setIsCreatingGame] = useState(false);
     const [actionBusy, setActionBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [isHost, setIsHost] = useState(true);
+    const [isHost, setIsHost] = useState(false);
+    const [hostStatusReady, setHostStatusReady] = useState(!initialGameId);
     const [liveOffline, setLiveOffline] = useState(false);
     const [mapReady, setMapReady] = useState(false);
     const [countriesGeometryReady, setCountriesGeometryReady] = useState(false);
@@ -121,10 +125,15 @@ export default function Map({
         };
     }, []);
 
-    // Spectate / resume
+    // Spectate / resume — default non-host until host-status returns
     useEffect(() => {
-        if (!initialGameId) return;
+        if (!initialGameId) {
+            setHostStatusReady(true);
+            return;
+        }
         let cancelled = false;
+        setIsHost(false);
+        setHostStatusReady(false);
         void getGame(initialGameId)
             .then((loaded) => {
                 if (!cancelled) mergeGame(loaded);
@@ -132,7 +141,9 @@ export default function Map({
             .catch((err) => {
                 if (!cancelled) {
                     setError(
-                        err instanceof Error ? err.message : "Game not found"
+                        err instanceof Error
+                            ? err.message
+                            : "Invalid or missing game id."
                     );
                 }
             });
@@ -141,11 +152,25 @@ export default function Map({
             { credentials: "include" }
         )
             .then(async (response) => {
-                if (!response.ok) return;
+                if (!response.ok) {
+                    if (!cancelled) {
+                        setIsHost(false);
+                        setHostStatusReady(true);
+                    }
+                    return;
+                }
                 const body = (await response.json()) as { isHost?: boolean };
-                if (!cancelled) setIsHost(Boolean(body.isHost));
+                if (!cancelled) {
+                    setIsHost(Boolean(body.isHost));
+                    setHostStatusReady(true);
+                }
             })
-            .catch(() => undefined);
+            .catch(() => {
+                if (!cancelled) {
+                    setIsHost(false);
+                    setHostStatusReady(true);
+                }
+            });
         return () => {
             cancelled = true;
         };
@@ -194,7 +219,7 @@ export default function Map({
                     {
                         id: "background",
                         type: "background",
-                        paint: { "background-color": "#061018" },
+                        paint: { "background-color": "#03141c" },
                     },
                 ],
             },
@@ -406,61 +431,32 @@ export default function Map({
         );
     }, [game, mapReady]);
 
-    // Troop count markers (fallback until Pixi atlas loads)
-    useEffect(() => {
-        const currentMap = map.current;
-        for (const marker of troopMarkersRef.current) marker.remove();
-        troopMarkersRef.current = [];
-        if (!currentMap || !mapReady || !game || !countryCentersReady) return;
-
-        for (const territory of game.territories) {
-            const coords = countryCentersRef.current[territory.countryId];
-            if (!coords) continue;
-            const owner = game.factions.find(
-                (f) => f.id === territory.ownerFactionId
-            );
-            const el = document.createElement("div");
-            el.textContent = String(territory.soldiers);
-            Object.assign(el.style, {
-                minWidth: "26px",
-                height: "26px",
-                padding: "0 6px",
-                borderRadius: "4px",
-                background: owner?.color ?? "#333",
-                color: "#fff",
-                border: "1px solid #2ee6ff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "11px",
-                fontWeight: "700",
-                pointerEvents: "none",
-                boxShadow: "0 0 8px rgba(46,230,255,0.35)",
-            });
-            troopMarkersRef.current.push(
-                new Marker({ element: el, anchor: "center" })
-                    .setLngLat(coords)
-                    .addTo(currentMap)
-            );
-        }
-        return () => {
-            for (const marker of troopMarkersRef.current) marker.remove();
-            troopMarkersRef.current = [];
-        };
-    }, [game, mapReady, countryCentersReady]);
-
-    // Presentation speed → NPC API
+    // Presentation speed → NPC API (soft-retry once on version conflict)
     useEffect(() => {
         if (!game || !isHost) return;
         const humanTurn =
             game.factions.find((f) => f.id === game.currentFactionId)?.type ===
             FactionType.Human;
+        if (humanTurn && presentationSpeed !== 1) {
+            setPresentationSpeed(1);
+            return;
+        }
         const desired = humanTurn ? 1 : presentationSpeed;
         if ((game.npcSpeed ?? 1) === desired) return;
-        void setNpcSpeed(game.id, game.version, desired)
+        const gameId = game.id;
+        void setNpcSpeed(gameId, game.version, desired)
             .then(mergeGame)
-            .catch(() => undefined);
-    }, [presentationSpeed, game?.currentFactionId, game?.id, isHost]);
+            .catch(async () => {
+                try {
+                    const fresh = await getGame(gameId);
+                    mergeGame(fresh);
+                    if ((fresh.npcSpeed ?? 1) === desired) return;
+                    mergeGame(await setNpcSpeed(gameId, fresh.version, desired));
+                } catch {
+                    /* ignore */
+                }
+            });
+    }, [presentationSpeed, game?.currentFactionId, game?.id, game?.version, isHost]);
 
     // NPC combat rounds finish server-side — drive Pixi from event stream
     useEffect(() => {
@@ -582,6 +578,7 @@ export default function Map({
             );
             setGame(result.game);
             setIsHost(true);
+            setHostStatusReady(true);
             window.history.pushState({}, "", `/game/${result.game.id}`);
         } catch (err) {
             setError(
@@ -592,21 +589,62 @@ export default function Map({
         }
     }
 
-    // Territory drag (reinforce / attack)
+    function projectDragLine() {
+        const currentMap = map.current;
+        const drag = dragRef.current;
+        if (!currentMap || !drag) {
+            setDragLine(null);
+            return;
+        }
+        const a = currentMap.project(drag.startLngLat);
+        const b = currentMap.project(drag.endLngLat);
+        setDragLine({
+            x1: a.x,
+            y1: a.y,
+            x2: b.x,
+            y2: b.y,
+            valid: drag.valid,
+        });
+    }
+
+    function clearDrag() {
+        const currentMap = map.current;
+        dragRef.current = null;
+        setDragLine(null);
+        currentMap?.dragPan.enable();
+    }
+
+    // Territory drag (reinforce / attack) — world-anchored arrow
     useEffect(() => {
         const currentMap = map.current;
         if (!currentMap || !mapReady || !game || !isHost) return;
         const canvas = currentMap.getCanvas();
 
+        const evalValid = (sourceId: string, destId: string | null) => {
+            const human = game.factions.find((f) => f.type === FactionType.Human);
+            const dest = game.territories.find((t) => t.countryId === destId);
+            if (!dest || !human || !destId || destId === sourceId) return false;
+            if (
+                dest.ownerFactionId === human.id &&
+                (game.currentPhase === TurnPhase.ReinforcementOne ||
+                    game.currentPhase === TurnPhase.ReinforcementTwo)
+            ) {
+                return true;
+            }
+            if (
+                dest.ownerFactionId !== human.id &&
+                game.currentPhase === TurnPhase.Combat &&
+                !game.activeCombat
+            ) {
+                return true;
+            }
+            return false;
+        };
+
         const onDown = (e: MouseEvent) => {
             if (e.button !== 0) return;
             const human = game.factions.find((f) => f.type === FactionType.Human);
             if (!human || game.currentFactionId !== human.id) return;
-            const point = currentMap.project(
-                // approximate from pixel — use map method
-                currentMap.unproject([e.offsetX, e.offsetY])
-            );
-            void point;
             const features = currentMap.queryRenderedFeatures(
                 [e.offsetX, e.offsetY],
                 { layers: ["countries-interactive"] }
@@ -618,66 +656,40 @@ export default function Map({
                 (t) => t.countryId === iso && t.ownerFactionId === human.id
             );
             if (!territory || territory.soldiers < 2) return;
+            const lngLat = currentMap.unproject([e.offsetX, e.offsetY]);
+            const pair: LngLatPair = [lngLat.lng, lngLat.lat];
             dragRef.current = {
                 sourceId: iso,
-                start: { x: e.offsetX, y: e.offsetY },
+                startLngLat: pair,
+                endLngLat: pair,
+                valid: false,
             };
             currentMap.dragPan.disable();
-            setDragLine({
-                x1: e.offsetX,
-                y1: e.offsetY,
-                x2: e.offsetX,
-                y2: e.offsetY,
-                valid: false,
-            });
+            projectDragLine();
         };
 
         const onMove = (e: MouseEvent) => {
             if (!dragRef.current) return;
+            const lngLat = currentMap.unproject([e.offsetX, e.offsetY]);
             const features = currentMap.queryRenderedFeatures(
                 [e.offsetX, e.offsetY],
                 { layers: ["countries-interactive"] }
             );
             const destId = features[0]?.id ? String(features[0].id) : null;
-            const human = game.factions.find((f) => f.type === FactionType.Human);
-            const dest = game.territories.find((t) => t.countryId === destId);
-            let valid = false;
-            if (dest && human && destId !== dragRef.current.sourceId) {
-                if (
-                    dest.ownerFactionId === human.id &&
-                    (game.currentPhase === TurnPhase.ReinforcementOne ||
-                        game.currentPhase === TurnPhase.ReinforcementTwo)
-                ) {
-                    valid = true;
-                }
-                if (
-                    dest.ownerFactionId !== human.id &&
-                    game.currentPhase === TurnPhase.Combat &&
-                    !game.activeCombat
-                ) {
-                    valid = true;
-                }
-            }
-            setDragLine({
-                x1: dragRef.current.start.x,
-                y1: dragRef.current.start.y,
-                x2: e.offsetX,
-                y2: e.offsetY,
-                valid,
-            });
+            dragRef.current.endLngLat = [lngLat.lng, lngLat.lat];
+            dragRef.current.valid = evalValid(dragRef.current.sourceId, destId);
+            projectDragLine();
         };
 
         const onUp = (e: MouseEvent) => {
             if (!dragRef.current) return;
             const sourceId = dragRef.current.sourceId;
-            dragRef.current = null;
-            currentMap.dragPan.enable();
-            setDragLine(null);
             const features = currentMap.queryRenderedFeatures(
                 [e.offsetX, e.offsetY],
                 { layers: ["countries-interactive"] }
             );
             const destId = features[0]?.id ? String(features[0].id) : null;
+            clearDrag();
             if (!destId || destId === sourceId) return;
             const human = game.factions.find((f) => f.type === FactionType.Human);
             const source = game.territories.find((t) => t.countryId === sourceId);
@@ -720,14 +732,35 @@ export default function Map({
             }
         };
 
+        const onCancel = () => clearDrag();
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") clearDrag();
+        };
+
+        const onCam = () => {
+            if (dragRef.current) projectDragLine();
+        };
+
         canvas.addEventListener("mousedown", onDown);
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
+        window.addEventListener("pointercancel", onCancel);
+        window.addEventListener("blur", onCancel);
+        window.addEventListener("keydown", onKey);
+        currentMap.on("move", onCam);
+        currentMap.on("zoom", onCam);
+        currentMap.on("resize", onCam);
         return () => {
             canvas.removeEventListener("mousedown", onDown);
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
-            currentMap.dragPan.enable();
+            window.removeEventListener("pointercancel", onCancel);
+            window.removeEventListener("blur", onCancel);
+            window.removeEventListener("keydown", onKey);
+            currentMap.off("move", onCam);
+            currentMap.off("zoom", onCam);
+            currentMap.off("resize", onCam);
+            clearDrag();
         };
     }, [game, mapReady, isHost, actionBusy]);
 
@@ -805,67 +838,69 @@ export default function Map({
                 </svg>
             )}
 
-            <div
-                style={{
-                    position: "absolute",
-                    top: 56,
-                    left: 12,
-                    width: 260,
-                    zIndex: 10,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                    maxHeight: "calc(100dvh - 200px)",
-                    pointerEvents: "none",
-                }}
-            >
-                <div style={{ pointerEvents: "auto" }}>
-                    {selectedCountry && mode !== "menu" && (
-                        <HoloPanel
-                            id="selection"
-                            title={selectedCountry.name}
-                            side="left"
-                            embedded
-                        >
-                            <CountryInfoPanel
-                                selectedCountry={selectedCountry}
-                                selectedCountryData={selectedCountryData}
-                                selectedTerritory={selectedTerritory}
-                                selectedOwner={selectedOwner}
-                                gameExists={!!game}
-                                isCreatingGame={isCreatingGame}
-                                onCreateGame={() => void handleCreateGame()}
-                            />
-                        </HoloPanel>
-                    )}
+            {mode === "select" && !game && !selectedCountry && (
+                <div className="holo-panel holo-prompt">
+                    Select a starting country on the map
                 </div>
-                <div style={{ pointerEvents: "auto" }}>
-                    {game && (
-                        <HoloPanel
-                            id="log"
-                            title="Log"
-                            side="left"
-                            embedded
-                            defaultOpen={false}
-                        >
-                            <ActionLog gameId={game.id} />
-                        </HoloPanel>
-                    )}
-                </div>
-                <div style={{ pointerEvents: "auto" }}>
-                    {game && (
-                        <HoloPanel
-                            id="commentary"
-                            title="Battle AI"
-                            side="left"
-                            embedded
-                            defaultOpen={false}
-                        >
-                            <BattleCommentary gameId={game.id} />
-                        </HoloPanel>
-                    )}
-                </div>
-            </div>
+            )}
+
+            {selectedCountry && mode !== "menu" && (
+                <HoloPanel
+                    id="selection"
+                    title="Info"
+                    side="left"
+                    defaultOpen
+                    tabTop={72}
+                >
+                    <CountryInfoPanel
+                        selectedCountry={selectedCountry}
+                        selectedCountryData={selectedCountryData}
+                        selectedTerritory={selectedTerritory}
+                        selectedOwner={selectedOwner}
+                        gameExists={!!game}
+                        isCreatingGame={isCreatingGame}
+                        onCreateGame={() => void handleCreateGame()}
+                    />
+                </HoloPanel>
+            )}
+
+            {game && (
+                <HoloPanel
+                    id="log"
+                    title="Log"
+                    side="left"
+                    defaultOpen
+                    tabTop={200}
+                >
+                    <ActionLog gameId={game.id} />
+                </HoloPanel>
+            )}
+
+            {game && (
+                <HoloPanel
+                    id="commentary"
+                    title="Battle AI"
+                    side="left"
+                    defaultOpen={false}
+                    tabTop={320}
+                >
+                    <BattleCommentary gameId={game.id} />
+                </HoloPanel>
+            )}
+
+            {rulesOpen && <RulesPanel onClose={() => setRulesOpen(false)} />}
+
+            {mode !== "menu" && (
+                <button
+                    type="button"
+                    className="holo-fab"
+                    aria-label="Rules"
+                    title="Rules"
+                    onClick={() => setRulesOpen((v) => !v)}
+                >
+                    i
+                </button>
+            )}
 
             {game && (
                 <HoloPanel id="factions" title={`Round ${game.round}`} side="right">
@@ -911,10 +946,9 @@ export default function Map({
                 }
             />
 
-            {/* Troop counts use MapLibre markers only — no unit glyphs over the numbers. */}
             <PixiArmyLayer
                 map={map.current}
-                enabled={false}
+                enabled={Boolean(game) && countryCentersReady}
                 centers={countryCentersRef.current}
                 territories={game?.territories ?? []}
                 factions={game?.factions ?? []}
@@ -932,7 +966,7 @@ export default function Map({
                 />
             )}
 
-            {game && isHost && (
+            {game && isHost && hostStatusReady && (
                 <TroopPool
                     game={game}
                     presentationSpeed={presentationSpeed}
@@ -1037,22 +1071,24 @@ export default function Map({
                 </TroopPool>
             )}
 
-            {game && !isHost && (
+            {game && hostStatusReady && !isHost && (
                 <div
                     className="holo-panel"
                     style={{
                         position: "absolute",
-                        left: 12,
+                        left: "50%",
                         bottom: 12,
+                        transform: "translateX(-50%)",
                         zIndex: 15,
-                        padding: "10px 14px",
+                        padding: "10px 16px",
+                        textAlign: "center",
                     }}
                 >
-                    Spectating — read only
+                    Spectating — live, read only
                 </div>
             )}
 
-            {game && isHost && (
+            {game && isHost && hostStatusReady && (
                 <button
                     type="button"
                     className="holo-btn"

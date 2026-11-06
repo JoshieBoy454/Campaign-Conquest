@@ -51,6 +51,24 @@ export async function loadCountryGeoJson(
     return { collection, selectableIsos: catalogueIsos };
 }
 
+async function loadTerrainImageOnce(
+    map: MapLibreMap,
+    id: TerrainClass,
+    url: string
+): Promise<boolean> {
+    if (!map.getStyle?.()) return false;
+    try {
+        if (map.hasImage(id)) return true;
+        const img = await map.loadImage(url);
+        if (!map.getStyle?.() || map.hasImage(id)) return true;
+        map.addImage(id, img.data, { pixelRatio: 1 });
+        return true;
+    } catch (err) {
+        console.warn(`Terrain image failed: ${id}`, err);
+        return false;
+    }
+}
+
 export async function registerTerrainImages(map: MapLibreMap): Promise<void> {
     const entries = Object.entries(TERRAIN_IMAGE_URLS) as [
         TerrainClass,
@@ -58,15 +76,10 @@ export async function registerTerrainImages(map: MapLibreMap): Promise<void> {
     ][];
     await Promise.all(
         entries.map(async ([id, url]) => {
-            // Style can be gone if the map was removed mid-load.
-            if (!map.getStyle?.()) return;
-            try {
-                if (map.hasImage(id)) return;
-                const img = await map.loadImage(url);
-                if (!map.getStyle?.() || map.hasImage(id)) return;
-                map.addImage(id, img.data, { pixelRatio: 1 });
-            } catch (err) {
-                console.warn(`Terrain image failed: ${id}`, err);
+            const ok = await loadTerrainImageOnce(map, id, url);
+            if (!ok) {
+                await new Promise((r) => setTimeout(r, 250));
+                await loadTerrainImageOnce(map, id, url);
             }
         })
     );
@@ -84,7 +97,53 @@ export function addCountryLayers(map: MapLibreMap, data: FeatureCollection) {
         promoteId: "iso3",
     });
 
-    // Non-interactive base terrain (defaults; city when participating)
+    // Coastal halo (under land) — muted deep teal for near-shore water feel
+    map.addLayer({
+        id: "coast-halo",
+        type: "line",
+        source: "countries",
+        paint: {
+            "line-color": "#0a3a48",
+            "line-width": 14,
+            "line-opacity": 0.55,
+            "line-blur": 6,
+        },
+    });
+
+    map.addLayer({
+        id: "coast-foam",
+        type: "line",
+        source: "countries",
+        paint: {
+            "line-color": "#1a6a7a",
+            "line-width": 3,
+            "line-opacity": 0.35,
+            "line-blur": 1.5,
+        },
+    });
+
+    const underlay: Record<TerrainClass, string> = {
+        grassy: "#3a4a28",
+        desert: "#5a4a28",
+        icy: "#2a3a48",
+        city: "#1a2830",
+    };
+
+    // Solid underlays so fast zoom never shows empty ocean through land
+    for (const terrain of ["grassy", "desert", "icy", "city"] as TerrainClass[]) {
+        map.addLayer({
+            id: `terrain-under-${terrain}`,
+            type: "fill",
+            source: "countries",
+            filter: ["==", ["get", "terrainClass"], terrain],
+            paint: {
+                "fill-color": underlay[terrain],
+                "fill-opacity": 1,
+            },
+        });
+    }
+
+    // Pattern fills on top of underlays
     for (const terrain of ["grassy", "desert", "icy", "city"] as TerrainClass[]) {
         map.addLayer({
             id: `terrain-${terrain}`,
@@ -93,7 +152,7 @@ export function addCountryLayers(map: MapLibreMap, data: FeatureCollection) {
             filter: ["==", ["get", "terrainClass"], terrain],
             paint: {
                 "fill-pattern": terrain,
-                "fill-opacity": 0.95,
+                "fill-opacity": 0.92,
             },
         });
     }
