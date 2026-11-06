@@ -36,7 +36,6 @@ import {
     loadCountryGeoJson,
     registerTerrainImages,
     setParticipation,
-    setTerrainPatternsVisible,
 } from "../map/setupCountryLayers";
 import { presentationQueue } from "../services/presentationQueue";
 import type { CountryDefinition, GameState } from "../types/game";
@@ -262,7 +261,6 @@ export default function Map({
 
                     geoRef.current = collection;
                     addCountryLayers(currentMap, collection);
-                    setTerrainPatternsVisible(currentMap, true);
                     setCountriesGeometryReady(true);
 
                     // Centers from the same parse (no second GeoJSON fetch).
@@ -308,12 +306,6 @@ export default function Map({
         currentMap.on("mouseleave", "countries-interactive", () => {
             currentMap.getCanvas().style.cursor = "";
         });
-
-        // Hide heavy fill-patterns only while zooming; solids stay. Restore at any zoom.
-        const onZoomStart = () => setTerrainPatternsVisible(currentMap, false);
-        const onZoomEnd = () => setTerrainPatternsVisible(currentMap, true);
-        currentMap.on("zoomstart", onZoomStart);
-        currentMap.on("zoomend", onZoomEnd);
 
         currentMap.on("click", (event) => {
             const features = currentMap.queryRenderedFeatures(event.point, {
@@ -361,8 +353,6 @@ export default function Map({
             if (driftTimerRef.current) {
                 window.clearTimeout(driftTimerRef.current);
             }
-            currentMap.off("zoomstart", onZoomStart);
-            currentMap.off("zoomend", onZoomEnd);
             currentMap.remove();
             map.current = null;
         };
