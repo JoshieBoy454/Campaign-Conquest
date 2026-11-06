@@ -850,7 +850,7 @@ export default function Map({
                     title="Info"
                     side="left"
                     defaultOpen
-                    tabTop={72}
+                    tabTop={64}
                 >
                     <CountryInfoPanel
                         selectedCountry={selectedCountry}
@@ -870,7 +870,7 @@ export default function Map({
                     title="Log"
                     side="left"
                     defaultOpen
-                    tabTop={200}
+                    tabTop={112}
                 >
                     <ActionLog gameId={game.id} />
                 </HoloPanel>
@@ -882,7 +882,7 @@ export default function Map({
                     title="Battle AI"
                     side="left"
                     defaultOpen={false}
-                    tabTop={320}
+                    tabTop={160}
                 >
                     <BattleCommentary gameId={game.id} />
                 </HoloPanel>

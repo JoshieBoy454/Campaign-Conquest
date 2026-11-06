@@ -25,12 +25,30 @@ function readStored(id: string, fallback: boolean): boolean {
     return fallback;
 }
 
+/** Collapsed left-edge tabs — tight vertical stack. */
 const LEFT_TAB_TOP: Record<string, number> = {
-    selection: 72,
-    log: 200,
-    commentary: 320,
-    rules: 440,
+    selection: 64,
+    log: 112,
+    commentary: 160,
+    rules: 208,
 };
+
+/** Open left panels — non-overlapping vertical slots. */
+const LEFT_OPEN_SLOT: Record<string, { top: number | string; maxHeight: string }> =
+    {
+        selection: { top: 56, maxHeight: "28vh" },
+        log: { top: "calc(56px + 28vh + 8px)", maxHeight: "28vh" },
+        commentary: { top: "calc(56px + 56vh + 16px)", maxHeight: "28vh" },
+    };
+
+const EXIT_MS = 260;
+
+function prefersReducedMotion(): boolean {
+    return (
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+}
 
 export default function HoloPanel({
     id,
@@ -43,23 +61,41 @@ export default function HoloPanel({
     children,
 }: Props) {
     const [open, setOpen] = useState(() => readStored(id, defaultOpen));
-    const reduced =
-        typeof window !== "undefined" &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const [exiting, setExiting] = useState(false);
+    const reduced = prefersReducedMotion();
 
     useEffect(() => {
+        if (exiting) return;
         try {
             localStorage.setItem(`cc-hud-${id}`, open ? "1" : "0");
         } catch {
             /* ignore */
         }
-    }, [id, open]);
+    }, [id, open, exiting]);
 
-    if (!open) {
+    function requestClose() {
+        if (exiting) return;
+        if (reduced) {
+            setOpen(false);
+            return;
+        }
+        setExiting(true);
+    }
+
+    useEffect(() => {
+        if (!exiting) return;
+        const handle = window.setTimeout(() => {
+            setOpen(false);
+            setExiting(false);
+        }, EXIT_MS);
+        return () => window.clearTimeout(handle);
+    }, [exiting]);
+
+    if (!open && !exiting) {
         const top =
             tabTop ??
             LEFT_TAB_TOP[id] ??
-            (side === "left" ? 72 : side === "right" ? 72 : undefined);
+            (side === "left" ? 64 : side === "right" ? 72 : undefined);
         const tabStyle: CSSProperties =
             side === "left"
                 ? {
@@ -98,6 +134,7 @@ export default function HoloPanel({
         );
     }
 
+    const leftSlot = LEFT_OPEN_SLOT[id];
     const shell: CSSProperties =
         side === "right"
             ? {
@@ -123,20 +160,27 @@ export default function HoloPanel({
                 }
               : {
                     position: "absolute",
-                    top: 56,
+                    top: leftSlot?.top ?? 56,
                     left: 12,
                     width,
-                    maxHeight: "calc(100dvh - 200px)",
+                    maxHeight: leftSlot?.maxHeight ?? "28vh",
                     zIndex,
                     display: "flex",
                     flexDirection: "column",
                 };
 
+    const animClass = reduced
+        ? ""
+        : exiting
+          ? side === "right"
+              ? " holo-panel-exit-right"
+              : " holo-panel-exit"
+          : side === "right"
+            ? " holo-panel-enter-right"
+            : " holo-panel-enter";
+
     return (
-        <div
-            className={`holo-panel${reduced ? "" : " holo-panel-enter"}`}
-            style={shell}
-        >
+        <div className={`holo-panel${animClass}`} style={shell}>
             <div className="holo-panel-header">
                 <span>{title}</span>
                 <button
@@ -147,8 +191,9 @@ export default function HoloPanel({
                         writingMode: "horizontal-tb",
                         transform: "none",
                     }}
-                    onClick={() => setOpen(false)}
+                    onClick={requestClose}
                     aria-label={`Hide ${title}`}
+                    disabled={exiting}
                 >
                     −
                 </button>

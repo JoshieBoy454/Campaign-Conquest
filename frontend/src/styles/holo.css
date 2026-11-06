@@ -135,8 +135,64 @@
   }
 }
 
+@keyframes holo-panel-out {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-12px) scale(0.96);
+  }
+}
+
+@keyframes holo-panel-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes holo-panel-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(12px) scale(0.96);
+  }
+}
+
 .holo-panel-enter {
-  animation: holo-panel-in 0.28s ease-out;
+  animation: holo-panel-in 0.26s ease-out;
+}
+
+.holo-panel-exit {
+  animation: holo-panel-out 0.26s ease-in forwards;
+  pointer-events: none;
+}
+
+.holo-panel-enter-right {
+  animation: holo-panel-in-right 0.26s ease-out;
+}
+
+.holo-panel-exit-right {
+  animation: holo-panel-out-right 0.26s ease-in forwards;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-panel-enter,
+  .holo-panel-exit,
+  .holo-panel-enter-right,
+  .holo-panel-exit-right {
+    animation: none;
+  }
 }
 
 .holo-fab {
