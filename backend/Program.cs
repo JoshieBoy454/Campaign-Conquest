@@ -1,5 +1,8 @@
 using Configuration;
 using Hubs;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver;
 using Repositories;
 using Services;
@@ -36,6 +39,9 @@ bool useMongo = !string.IsNullOrWhiteSpace(mongoConnectionString);
 
 if (useMongo)
 {
+    // MongoDB.Driver 3.x requires an explicit Guid representation or InsertOne throws.
+    BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
+
     builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnectionString));
     builder.Services.AddSingleton<IGameRepository, MongoGameRepository>();
     builder.Services.AddSingleton<IGameEventRepository, MongoGameEventRepository>();

@@ -82,6 +82,9 @@ export default function Map({ initialGameId = null }: MapProps) {
     // Indicates that MapLibre has finished creating its map layers
     const [mapReady, setMapReady] = useState(false);
 
+    // countries.geojson is ~40MB on CDN — show a loader until polygons paint
+    const [countriesGeometryReady, setCountriesGeometryReady] = useState(false);
+
     // spectate / refresh — pull the game if we landed on /game/:id
     useEffect(() => {
         if (!initialGameId) {
@@ -267,6 +270,59 @@ export default function Map({ initialGameId = null }: MapProps) {
                     "line-width": 1,
                 },
             });
+
+            // #region agent log
+            const geoLoadStartedAt = performance.now();
+            const debugLog = (
+                hypothesisId: string,
+                message: string,
+                data: Record<string, unknown>
+            ) => {
+                fetch(
+                    "http://127.0.0.1:7827/ingest/a3beda06-c7ad-4526-b257-757e72cb3335",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-Debug-Session-Id": "6af24c",
+                        },
+                        body: JSON.stringify({
+                            sessionId: "6af24c",
+                            runId: "post-fix",
+                            hypothesisId,
+                            location: "Map.tsx:countries-source",
+                            message,
+                            data,
+                            timestamp: Date.now(),
+                        }),
+                    }
+                ).catch(() => {});
+            };
+            // #endregion
+
+            const markCountriesReady = () => {
+                if (currentMap.isSourceLoaded("countries")) {
+                    setCountriesGeometryReady(true);
+                    // #region agent log
+                    debugLog("H1-geojson-slow", "countries source loaded", {
+                        elapsedMs: Math.round(performance.now() - geoLoadStartedAt),
+                    });
+                    // #endregion
+                }
+            };
+            currentMap.on("sourcedata", (event) => {
+                if (event.sourceId === "countries") {
+                    markCountriesReady();
+                }
+            });
+            currentMap.on("error", (event) => {
+                // #region agent log
+                debugLog("H1-geojson-slow", "maplibre error", {
+                    error: String(event.error?.message ?? event.error ?? "unknown"),
+                });
+                // #endregion
+            });
+            markCountriesReady();
 
             // Listens for hte mouse to hover over a countrys fill layer then changes the pointer
             currentMap.on("mouseenter", "countries-fill", () => {
@@ -665,6 +721,28 @@ export default function Map({ initialGameId = null }: MapProps) {
     
             // Send the selected country ID to the backend
             const result = await createGame(String(selectedCountry.id));
+
+            // #region agent log
+            fetch(
+                "http://127.0.0.1:7827/ingest/a3beda06-c7ad-4526-b257-757e72cb3335",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-Debug-Session-Id": "6af24c",
+                    },
+                    body: JSON.stringify({
+                        sessionId: "6af24c",
+                        runId: "post-fix",
+                        hypothesisId: "H2-create-500",
+                        location: "Map.tsx:handleCreateGame",
+                        message: "createGame succeeded",
+                        data: { gameId: result.game.id },
+                        timestamp: Date.now(),
+                    }),
+                }
+            ).catch(() => {});
+            // #endregion
     
             // Store the game returned by the backend
             setGame(result.game);
@@ -679,6 +757,30 @@ export default function Map({ initialGameId = null }: MapProps) {
             console.log("Game created successfully:", result.game.id);
         }
         catch (err) {
+            // #region agent log
+            fetch(
+                "http://127.0.0.1:7827/ingest/a3beda06-c7ad-4526-b257-757e72cb3335",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-Debug-Session-Id": "6af24c",
+                    },
+                    body: JSON.stringify({
+                        sessionId: "6af24c",
+                        runId: "post-fix",
+                        hypothesisId: "H2-create-500",
+                        location: "Map.tsx:handleCreateGame",
+                        message: "createGame failed",
+                        data: {
+                            error:
+                                err instanceof Error ? err.message : String(err),
+                        },
+                        timestamp: Date.now(),
+                    }),
+                }
+            ).catch(() => {});
+            // #endregion
     
             setError(
                 err instanceof Error
@@ -729,6 +831,25 @@ export default function Map({ initialGameId = null }: MapProps) {
                     height: "100vh",
                 }}
             />
+            {!countriesGeometryReady && (
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "rgba(11, 18, 32, 0.55)",
+                        color: "#F8FAFC",
+                        zIndex: 5,
+                        pointerEvents: "none",
+                        fontSize: 18,
+                        letterSpacing: "0.02em",
+                    }}
+                >
+                    Loading world map…
+                </div>
+            )}
             {selectedCountry && (
                 <CountryInfoPanel
                     selectedCountry={selectedCountry}
