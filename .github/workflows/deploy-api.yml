@@ -46,22 +46,19 @@ jobs:
           # Optional Gemini key for Battle AI (GitHub secret LLM_API_KEY → LLM__ApiKey)
           if [ -n "${LLM_API_KEY:-}" ]; then
             printf 'LLM__ApiKey=%s\n' "$LLM_API_KEY" > /tmp/campaign-llm.env
-            scp -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem /tmp/campaign-llm.env "$USERNAME@$EC2_HOST:/tmp/campaign-llm.env"
-            rm -f /tmp/campaign-llm.env
+            printf '%s\n' '[Service]' 'EnvironmentFile=-/etc/campaign-conquest/llm.env' > /tmp/campaign-llm.conf
+            scp -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem /tmp/campaign-llm.env /tmp/campaign-llm.conf "$USERNAME@$EC2_HOST:/tmp/"
+            rm -f /tmp/campaign-llm.env /tmp/campaign-llm.conf
           fi
-          ssh -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem "$USERNAME@$EC2_HOST" \
-            LLM_PRESENT="$([ -n "${LLM_API_KEY:-}" ] && echo 1 || echo 0)" bash <<'EOF'
+          ssh -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem "$USERNAME@$EC2_HOST" bash <<'EOF'
             set -euo pipefail
             sudo mkdir -p /var/www/campaign-api
             sudo tar -xzf /tmp/campaign-api.tgz -C /var/www/campaign-api
-            if [ "${LLM_PRESENT}" = "1" ] && [ -f /tmp/campaign-llm.env ]; then
-              sudo mkdir -p /etc/campaign-conquest
+            if [ -f /tmp/campaign-llm.env ] && [ -f /tmp/campaign-llm.conf ]; then
+              sudo mkdir -p /etc/campaign-conquest /etc/systemd/system/campaign-api.service.d
               sudo mv /tmp/campaign-llm.env /etc/campaign-conquest/llm.env
               sudo chmod 600 /etc/campaign-conquest/llm.env
-              sudo tee /etc/systemd/system/campaign-api.service.d/llm.conf >/dev/null <<'UNIT'
-            [Service]
-            EnvironmentFile=-/etc/campaign-conquest/llm.env
-            UNIT
+              sudo mv /tmp/campaign-llm.conf /etc/systemd/system/campaign-api.service.d/llm.conf
               sudo systemctl daemon-reload
             fi
             sudo systemctl restart campaign-api
