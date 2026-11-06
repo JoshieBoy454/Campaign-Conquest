@@ -1,6 +1,6 @@
 namespace Rules;
 
-// ---- D6 comparison rules (unsorted 2v2, single vs max for 1v2/2v1) ----
+// ---- D6 comparison (Risk-style: sort high→low, pair up to min count) ----
 public static class CombatDiceRules {
 
     public static (int AttackerLosses, int DefenderLosses) ResolveCasualties(
@@ -11,25 +11,15 @@ public static class CombatDiceRules {
             return (0, 0);
         }
 
+        List<int> attacker = attackerRolls.OrderByDescending(r => r).ToList();
+        List<int> defender = defenderRolls.OrderByDescending(r => r).ToList();
+
         int attackerLosses = 0;
         int defenderLosses = 0;
+        int pairs = Math.Min(attacker.Count, defender.Count);
 
-        if (attackerRolls.Count == 2 && defenderRolls.Count == 2) {
-
-            CompareRolls(attackerRolls[0], defenderRolls[0], ref attackerLosses, ref defenderLosses);
-            CompareRolls(attackerRolls[1], defenderRolls[1], ref attackerLosses, ref defenderLosses);
-        }
-        else if (attackerRolls.Count == 1 && defenderRolls.Count == 2) {
-
-            CompareRolls(attackerRolls[0], defenderRolls.Max(), ref attackerLosses, ref defenderLosses);
-        }
-        else if (attackerRolls.Count == 2 && defenderRolls.Count == 1) {
-
-            CompareRolls(attackerRolls.Max(), defenderRolls[0], ref attackerLosses, ref defenderLosses);
-        }
-        else {
-
-            CompareRolls(attackerRolls[0], defenderRolls[0], ref attackerLosses, ref defenderLosses);
+        for (int i = 0; i < pairs; i++) {
+            CompareRolls(attacker[i], defender[i], ref attackerLosses, ref defenderLosses);
         }
 
         return (attackerLosses, defenderLosses);

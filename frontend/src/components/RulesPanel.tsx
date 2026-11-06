@@ -61,15 +61,15 @@ export default function RulesPanel({ onClose }: Props) {
                             than one at a time when the stepper is available.
                         </p>
                         <p>
-                            <strong>Move troops</strong> — During reinforce, drag from one of
-                            your countries to another you own. Leave at least one soldier
-                            behind.
+                            <strong>Move troops</strong> — During reinforce, left-click one of
+                            your countries (2+ soldiers), then right-click another you own.
+                            Confirm how many to move; leave at least one behind.
                         </p>
                         <p>
-                            <strong>Combat</strong> — In the Combat phase, drag from a country
-                            with 2+ soldiers onto an enemy. Choose how many to commit (at least
-                            one stays home). Roll rounds or retreat; losses come from the
-                            server dice.
+                            <strong>Combat</strong> — Left-click your attacking country (2+
+                            soldiers), then right-click an enemy. Confirm the commit (one stays
+                            home). Attackers roll up to 3 dice, defenders up to 2. Roll rounds
+                            or retreat; losses come from the server dice.
                         </p>
                         <p>
                             <strong>Spectator</strong> — Open a game via the spectator link or

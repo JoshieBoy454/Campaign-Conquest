@@ -19,6 +19,8 @@ function diceKey(combat: CombatState): string {
 
 const ATTACKER_SLOTS = 3;
 const DEFENDER_SLOTS = 2;
+const ROLL_MS = 1100;
+const FRAME_MS = 55;
 
 function DieFace({
     value,
@@ -75,7 +77,7 @@ function DiceRow({
                 flexWrap: "nowrap",
             }}
         >
-            <span className="holo-muted" style={{ fontSize: 12, minWidth: 64 }}>
+            <span className="holo-muted" style={{ fontSize: 12, minWidth: 72 }}>
                 {label}
             </span>
             {Array.from({ length: slots }, (_, i) => {
@@ -123,7 +125,6 @@ export default function DiceOverlay({
         const finalAtk = combat.lastAttackerDice ?? [];
         const finalDef = combat.lastDefenderDice ?? [];
 
-        // No roll yet — show empty / awaiting
         if (finalAtk.length === 0 && finalDef.length === 0) {
             setDisplayAtk([]);
             setDisplayDef([]);
@@ -132,7 +133,6 @@ export default function DiceOverlay({
             return;
         }
 
-        // Same result as last time (e.g. poll refresh) — keep settled faces
         if (rollKey === lastKeyRef.current) {
             setDisplayAtk(finalAtk);
             setDisplayDef(finalDef);
@@ -160,14 +160,14 @@ export default function DiceOverlay({
             setDisplayDef(
                 finalDef.map(() => Math.floor(Math.random() * 6) + 1)
             );
-        }, 70);
+        }, FRAME_MS);
 
         const stop = window.setTimeout(() => {
             window.clearInterval(frames);
             setDisplayAtk(finalAtk);
             setDisplayDef(finalDef);
             setRolling(false);
-        }, 480);
+        }, ROLL_MS);
 
         return () => {
             window.clearInterval(frames);
@@ -231,20 +231,21 @@ export default function DiceOverlay({
                     </div>
                 </div>
 
+                {/* Enemy farther away; your (attacker) dice closer to the bottom HUD. */}
                 <div className={rolling ? "holo-dice-row-rolling" : undefined}>
                     <DiceRow
-                        label="Attacker"
-                        values={displayAtk}
-                        tone="atk"
-                        slots={ATTACKER_SLOTS}
+                        label="Enemy"
+                        values={displayDef}
+                        tone="def"
+                        slots={DEFENDER_SLOTS}
                     />
                 </div>
                 <div className={rolling ? "holo-dice-row-rolling" : undefined}>
                     <DiceRow
-                        label="Defender"
-                        values={displayDef}
-                        tone="def"
-                        slots={DEFENDER_SLOTS}
+                        label="You"
+                        values={displayAtk}
+                        tone="atk"
+                        slots={ATTACKER_SLOTS}
                     />
                 </div>
 

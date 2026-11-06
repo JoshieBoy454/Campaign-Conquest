@@ -141,18 +141,20 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
         TurnService turnService,
         List<NpcLoggedEvent> events) {
 
+        // Stack onto the strongest owned land so later combat can commit a real force.
         while (game.ReinforcementPool > 0) {
 
             Territory? target = game.Territories
                 .Where(t => t.OwnerFactionId == factionId)
                 .OrderByDescending(t => t.Soldiers)
+                .ThenBy(t => t.CountryId, StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault();
 
             if (target == null) {
                 break;
             }
 
-            int amount = Math.Min(game.ReinforcementPool, 1);
+            int amount = game.ReinforcementPool;
             turnService.AllocateReinforcements(game, factionId, target.CountryId, amount);
             events.Add(new NpcLoggedEvent("AllocateReinforcements", new {
                 factionId,
@@ -186,32 +188,36 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
             return;
         }
 
-        Territory? source = game.Territories
+        // Prefer the weakest enemy we can outnumber with a full leave-one-behind commit.
+        Territory? source = null;
+        Territory? target = null;
+        int commit = 0;
+
+        foreach (Territory candidateSource in game.Territories
             .Where(t => t.OwnerFactionId == factionId && t.Soldiers > 1)
-            .OrderByDescending(t => t.Soldiers)
-            .FirstOrDefault();
+            .OrderByDescending(t => t.Soldiers)) {
 
-        Territory? target = game.Territories
-            .Where(t => t.OwnerFactionId != factionId && !IsDefeatedOwner(game, t.OwnerFactionId))
-            .OrderBy(t => t.Soldiers)
-            .FirstOrDefault();
+            int available = candidateSource.Soldiers - 1;
+            Territory? candidateTarget = game.Territories
+                .Where(t =>
+                    t.OwnerFactionId != factionId &&
+                    !IsDefeatedOwner(game, t.OwnerFactionId) &&
+                    available > t.Soldiers)
+                .OrderBy(t => t.Soldiers)
+                .ThenByDescending(t => available - t.Soldiers)
+                .FirstOrDefault();
 
-        if (source == null || target == null) {
-            combatService.SkipCombat(game, factionId);
-            events.Add(new NpcLoggedEvent("SkipCombat", new {
-                factionId,
-                factionName,
-                phase = game.CurrentPhase.ToString(),
-                actor = "NPC",
-                reason = "noValidTarget",
-            }));
-            return;
+            if (candidateTarget == null) {
+                continue;
+            }
+
+            source = candidateSource;
+            target = candidateTarget;
+            commit = available;
+            break;
         }
 
-        int commit = Math.Min(source.Soldiers - 1, 2);
-
-        // Don't start a fight we would immediately retreat from
-        if (commit <= target.Soldiers) {
+        if (source == null || target == null || commit <= 0) {
             combatService.SkipCombat(game, factionId);
             events.Add(new NpcLoggedEvent("SkipCombat", new {
                 factionId,
@@ -219,10 +225,6 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
                 phase = game.CurrentPhase.ToString(),
                 actor = "NPC",
                 reason = "tooWeak",
-                sourceCountryId = source.CountryId,
-                sourceName = TerritoryName(game, source.CountryId),
-                destinationCountryId = target.CountryId,
-                destinationName = TerritoryName(game, target.CountryId),
             }));
             return;
         }

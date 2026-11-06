@@ -9,16 +9,29 @@ namespace CampaignConquest.Api.Tests;
 public class CombatDiceRulesTests {
 
     [Fact]
-    public void TwoVersusTwo_UsesUnsortedPairCompare_NotSortedHighLow() {
+    public void TwoVersusTwo_SortsHighToLowBeforePairing() {
 
         var attacker = new List<int> { 6, 2 };
         var defender = new List<int> { 5, 6 };
 
         (int attackerLosses, int defenderLosses) = CombatDiceRules.ResolveCasualties(attacker, defender);
 
-        // Unsorted pairs: 6>5 and 2<6 — sorted-high Risk rules would only cost the defender once.
+        // Sorted: 6v6 tie, 2v5 attacker dies.
         Assert.Equal(1, attackerLosses);
-        Assert.Equal(1, defenderLosses);
+        Assert.Equal(0, defenderLosses);
+    }
+
+    [Fact]
+    public void ThreeVersusTwo_UsesTopTwoAttackerDice() {
+
+        var attacker = new List<int> { 2, 6, 5 };
+        var defender = new List<int> { 4, 3 };
+
+        (int attackerLosses, int defenderLosses) = CombatDiceRules.ResolveCasualties(attacker, defender);
+
+        // Sorted: 6v4 and 5v3 — both defender losses.
+        Assert.Equal(0, attackerLosses);
+        Assert.Equal(2, defenderLosses);
     }
 
     [Fact]

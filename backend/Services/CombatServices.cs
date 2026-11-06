@@ -124,7 +124,8 @@ public class CombatService {
 
         combat.RoundNumber += 1;
 
-        int attackerDiceCount = Math.Min(2, combat.AttackerSoldiers);
+        // Attacker up to 3 dice, defender up to 2 (Risk-style).
+        int attackerDiceCount = Math.Min(3, combat.AttackerSoldiers);
         int defenderDiceCount = Math.Min(2, combat.DefenderSoldiers);
 
         List<int> attackerRolls = RollMany(attackerDiceCount);

@@ -13,7 +13,6 @@ export type PendingCommit = {
 type Props = {
     game: GameState;
     busy: boolean;
-    canAttackSelected: boolean;
     canPlaceOnSelected: boolean;
     attackFromName?: string;
     battleSourceName?: string;
@@ -28,7 +27,6 @@ type Props = {
     onAllocate: () => void;
     onRollCombat: () => void;
     onRetreat: () => void;
-    onAttackSelected: () => void;
 };
 
 const PHASE_LABELS: Record<number, string> = {
@@ -42,7 +40,6 @@ const PHASE_LABELS: Record<number, string> = {
 export default function PhaseControls({
     game,
     busy,
-    canAttackSelected,
     canPlaceOnSelected,
     attackFromName,
     battleSourceName,
@@ -57,7 +54,6 @@ export default function PhaseControls({
     onAllocate,
     onRollCombat,
     onRetreat,
-    onAttackSelected,
 }: Props) {
     const current = game.factions.find((f) => f.id === game.currentFactionId);
     const isHumanTurn = current?.type === FactionType.Human;
@@ -86,16 +82,6 @@ export default function PhaseControls({
         stepperMin = 1;
         stepperMax = poolMax;
         stepperLabel = "Place from pool";
-    } else if (
-        isHumanTurn &&
-        game.currentPhase === TurnPhase.Combat &&
-        !combatActive &&
-        canAttackSelected
-    ) {
-        showStepper = true;
-        stepperMin = 1;
-        stepperMax = safeCommitMax;
-        stepperLabel = "Attack with";
     }
 
     return (
@@ -243,19 +229,6 @@ export default function PhaseControls({
                                 >
                                     Place {Math.min(commitCount, poolMax)} on
                                     selected
-                                </button>
-                            )}
-
-                        {!pendingCommit &&
-                            game.currentPhase === TurnPhase.Combat &&
-                            !combatActive && (
-                                <button
-                                    type="button"
-                                    className="holo-btn holo-btn-primary"
-                                    disabled={busy || !canAttackSelected}
-                                    onClick={onAttackSelected}
-                                >
-                                    Attack selected
                                 </button>
                             )}
 

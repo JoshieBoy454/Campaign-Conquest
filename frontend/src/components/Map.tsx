@@ -997,13 +997,6 @@ export default function Map({
                     <PhaseControls
                         game={game}
                         busy={actionBusy}
-                        canAttackSelected={Boolean(
-                            selectedTerritory &&
-                                activeFaction?.type === FactionType.Human &&
-                                selectedTerritory.ownerFactionId !==
-                                    activeFaction.id &&
-                                attackSource
-                        )}
                         canPlaceOnSelected={canPlaceOnSelected}
                         attackFromName={attackSource?.name}
                         battleSourceName={
@@ -1091,36 +1084,6 @@ export default function Map({
                                 retreatCombat(game.id, game.version)
                             )
                         }
-                        onAttackSelected={() => {
-                            const human = humanFaction;
-                            const source = attackSource;
-                            const target = selectedTerritory;
-                            if (
-                                !source ||
-                                !human ||
-                                !target ||
-                                target.ownerFactionId === human.id
-                            ) {
-                                setError(
-                                    "Select an enemy country and own a land with 2+ soldiers."
-                                );
-                                return;
-                            }
-                            const max = Math.max(1, source.soldiers - 1);
-                            const count = Math.min(
-                                commitCountRef.current,
-                                max
-                            );
-                            void runGameAction(() =>
-                                startCombat(
-                                    game.id,
-                                    game.version,
-                                    source.countryId,
-                                    target.countryId,
-                                    Math.max(1, count)
-                                )
-                            );
-                        }}
                     />
                 </TroopPool>
             )}

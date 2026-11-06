@@ -304,14 +304,10 @@ public class TurnService {
 
         faction.TurnsPlayed++;
 
-        // Makes sure theres no Upkeep step on each player/factions first turn
-        // then adds to the reinforcement pool 2 * the amount of territories the player/faction controls
-        if (faction.TurnsPlayed > 1) {
-            
-            int territoryCount = game.Territories.Count(t => t.OwnerFactionId == faction.Id);
-
-            game.ReinforcementPool = territoryCount * 2;
-        }
+        // Reinforcements each turn (including the first full turn after BeginTurn).
+        // Pool = 2 × owned territories so NPCs and humans can stack for combat.
+        int territoryCount = game.Territories.Count(t => t.OwnerFactionId == faction.Id);
+        game.ReinforcementPool = Math.Max(0, territoryCount * 2);
     }
 
     // ---- Leave combat phase after skip or successful conquest ----

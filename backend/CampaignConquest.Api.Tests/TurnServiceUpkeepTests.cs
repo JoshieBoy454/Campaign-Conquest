@@ -8,7 +8,7 @@ namespace CampaignConquest.Api.Tests;
 public class TurnServiceUpkeepTests
 {
     [Fact]
-    public void StartGame_FirstTurn_HasZeroReinforcementPool()
+    public void StartGame_FirstTurn_GrantsReinforcementPool()
     {
         GameState game = BuildFreshGame();
         var turns = new TurnService();
@@ -16,7 +16,8 @@ public class TurnServiceUpkeepTests
 
         Faction current = game.Factions.Single(f => f.Id == game.CurrentFactionId);
         Assert.Equal(1, current.TurnsPlayed);
-        Assert.Equal(0, game.ReinforcementPool);
+        // 1 owned territory × 2
+        Assert.Equal(2, game.ReinforcementPool);
         Assert.Equal(TurnPhase.Upkeep, game.CurrentPhase);
         Assert.Equal(GameStatus.InProgress, game.Status);
     }

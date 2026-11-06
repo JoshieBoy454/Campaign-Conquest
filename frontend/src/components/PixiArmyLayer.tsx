@@ -202,6 +202,40 @@ export default function PixiArmyLayer({
             }
         };
 
+        type GeoMark = {
+            lngLat: [number, number];
+            offsetX: number;
+            offsetY: number;
+            faceToward?: [number, number];
+            yLift?: number;
+        };
+
+        const tagGeo = (
+            display: { x: number; y: number; rotation?: number },
+            mark: GeoMark
+        ) => {
+            (display as { __geo?: GeoMark }).__geo = mark;
+        };
+
+        const projectMarked = (display: {
+            x: number;
+            y: number;
+            rotation: number;
+        }) => {
+            const mark = (display as { __geo?: GeoMark }).__geo;
+            if (!mark) return;
+            const p = map.project(mark.lngLat);
+            display.x = p.x + mark.offsetX;
+            display.y = p.y + mark.offsetY;
+            if (mark.faceToward) {
+                const t = map.project(mark.faceToward);
+                display.rotation = facingRotation(display, t);
+            }
+            if (mark.yLift != null) {
+                display.y = p.y - mark.yLift;
+            }
+        };
+
         const makeSoldier = (
             parent: Container,
             ll: [number, number],
@@ -215,6 +249,12 @@ export default function PixiArmyLayer({
             const textures = animTexturesRef.current.get(anim);
             const color = ownerColor(ownerId);
             const scale = opts?.scale ?? SCALE_IDLE;
+            const mark: GeoMark = {
+                lngLat: ll,
+                offsetX: offset.x,
+                offsetY: -12 + offset.y,
+                faceToward,
+            };
 
             if (textures && textures.length > 0) {
                 const base = textures[0].width || 96;
@@ -237,6 +277,7 @@ export default function PixiArmyLayer({
                     sprite.x = p.x + offset.x;
                     sprite.y = p.y - 12 + offset.y;
                     sprite.rotation = rotation;
+                    tagGeo(sprite, mark);
                     parent.addChild(sprite);
                     return sprite;
                 }
@@ -250,6 +291,7 @@ export default function PixiArmyLayer({
                 sprite.x = p.x + offset.x;
                 sprite.y = p.y - 12 + offset.y;
                 sprite.rotation = rotation;
+                tagGeo(sprite, mark);
                 sprite.play();
                 parent.addChild(sprite);
                 return sprite;
@@ -261,6 +303,11 @@ export default function PixiArmyLayer({
             g.stroke({ width: 2, color: 0x2ee6ff, alpha: 0.9 });
             g.x = p.x + offset.x;
             g.y = p.y - 24 + offset.y;
+            tagGeo(g, {
+                lngLat: ll,
+                offsetX: offset.x,
+                offsetY: -24 + offset.y,
+            });
             parent.addChild(g);
             return g;
         };
@@ -281,6 +328,12 @@ export default function PixiArmyLayer({
             badge.y = p.y - yLift;
             badge.width = 44;
             badge.height = 22;
+            tagGeo(badge, {
+                lngLat: ll,
+                offsetX: 0,
+                offsetY: 0,
+                yLift,
+            });
             parent.addChild(badge);
         };
 
@@ -442,10 +495,16 @@ export default function PixiArmyLayer({
             }
         };
 
-        const onCam = () => {
-            // FX is screen-anchored; wipe it on pan/zoom so sprites don't float free.
+        const repositionLayer = () => {
+            const layer = layerRef.current;
+            if (!layer) return;
+            for (const child of layer.children) {
+                projectMarked(
+                    child as { x: number; y: number; rotation: number }
+                );
+            }
+            // FX is ephemeral screen clutter — drop it while the camera moves.
             clearContainer(fxRef.current);
-            redrawLod();
         };
 
         // Wait briefly for textures if still loading, then draw.
@@ -461,15 +520,14 @@ export default function PixiArmyLayer({
         tryDraw();
 
         const unsub = presentationQueue.subscribe(onPresentation);
-        map.on("move", onCam);
-        map.on("zoom", onCam);
-        map.on("resize", onCam);
+        // Reproject existing markers each frame so they stay glued to the map.
+        map.on("render", repositionLayer);
+        map.on("resize", redrawLod);
         return () => {
             cancelled = true;
             unsub();
-            map.off("move", onCam);
-            map.off("zoom", onCam);
-            map.off("resize", onCam);
+            map.off("render", repositionLayer);
+            map.off("resize", redrawLod);
             clearContainer(layerRef.current);
             clearContainer(fxRef.current);
         };
