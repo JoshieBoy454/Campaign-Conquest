@@ -16,7 +16,6 @@ const FRIENDLY: Record<string, string> = {
     SetNpcSpeed: "Pacing changed",
     NpcTurn: "NPC turn",
     NpcCombatRound: "NPC combat",
-    CommentaryAvailable: "Battle AI",
 };
 
 function str(v: unknown, fallback = "?"): string {
@@ -114,10 +113,6 @@ function detailFor(event: GameEventRow): string | null {
         if (event.type === "NpcTurn") {
             return str(p.factionName, "");
         }
-
-        if (event.type === "CommentaryAvailable") {
-            return str(p.commentary, "").slice(0, 120);
-        }
     } catch {
         return null;
     }
@@ -158,7 +153,12 @@ export default function ActionLog({ gameId }: Props) {
             afterRef.current = maxSeq;
             setEvents((prev) => {
                 const seen = new Set(prev.map((e) => e.eventId));
-                const incoming = rows.filter((r) => !seen.has(r.eventId));
+                // Commentary belongs in Battle AI only — keep the log factual.
+                const incoming = rows.filter(
+                    (r) =>
+                        !seen.has(r.eventId) &&
+                        r.type !== "CommentaryAvailable"
+                );
                 // Newest first: prepend higher sequences
                 const merged = [...incoming.reverse(), ...prev];
                 return merged.slice(0, 80);
