@@ -20,10 +20,8 @@ export function connectGameHub(
         onGameUpdated(game);
     });
 
-    void connection
-        .start()
-        .then(() => connection.invoke("JoinGame", gameId))
-        .catch((err) => console.warn("SignalR join failed", err));
+    // Caller starts + JoinGame so it can track online/offline state
+    void gameId;
 
     return connection;
 }

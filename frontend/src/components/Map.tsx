@@ -23,13 +23,13 @@ import DiceOverlay from "./DiceOverlay";
 import ActionLog from "./ActionLog";
 import PixiEffectsLayer from "./PixiEffectsLayer";
 import GameEndOverlay from "./GameEndOverlay";
+import HudPanel from "./HudPanel";
 
 import type {
     CountryDefinition,
     GameState,
-    TurnOrderRoll
 } from "../types/game";
-import { FactionType, TurnPhase } from "../types/game";
+import { FactionType, GameStatus } from "../types/game";
 
 
 setWorkerUrl(workerUrl);
@@ -70,20 +70,27 @@ export default function Map({ initialGameId = null }: MapProps) {
     //Stores the current game returned by thebackend
     const [game, setGame] = useState<GameState | null>(null);
 
-    // Stores the D20 results for future dice animations
-    const [turnOrderRolls, setTurnOrderRolls] = useState<TurnOrderRoll[]>([]);
-
     const [isCreatingGame, setIsCreatingGame] = useState(false);
     const [actionBusy, setActionBusy] = useState(false);
 
     const [error, setError] = useState<string | null>(null);
     const [isHost, setIsHost] = useState(true);
+    const [liveOffline, setLiveOffline] = useState(false);
 
     // Indicates that MapLibre has finished creating its map layers
     const [mapReady, setMapReady] = useState(false);
 
     // countries.geojson is ~40MB on CDN — show a loader until polygons paint
     const [countriesGeometryReady, setCountriesGeometryReady] = useState(false);
+
+    function mergeGame(next: GameState) {
+        setGame((prev) => {
+            if (!prev || next.version >= prev.version) {
+                return next;
+            }
+            return prev;
+        });
+    }
 
     // spectate / refresh — pull the game if we landed on /game/:id
     useEffect(() => {
@@ -94,7 +101,7 @@ export default function Map({ initialGameId = null }: MapProps) {
         void getGame(initialGameId)
             .then((loaded) => {
                 if (!cancelled) {
-                    setGame(loaded);
+                    mergeGame(loaded);
                 }
             })
             .catch((err) => {
@@ -123,15 +130,45 @@ export default function Map({ initialGameId = null }: MapProps) {
         };
     }, [initialGameId]);
 
-    // live updates when a game is up
+    // SignalR when available + poll fallback so NPC turns still appear
     useEffect(() => {
         if (!game?.id) {
             return;
         }
-        const connection = connectGameHub(game.id, (next) => {
-            setGame(next);
+
+        const gameId = game.id;
+        setLiveOffline(false);
+
+        const connection = connectGameHub(gameId, (next) => {
+            setLiveOffline(false);
+            mergeGame(next);
         });
+
+        connection.onclose(() => setLiveOffline(true));
+        connection.onreconnecting(() => setLiveOffline(true));
+        connection.onreconnected(() => setLiveOffline(false));
+
+        void connection
+            .start()
+            .then(() => connection.invoke("JoinGame", gameId))
+            .then(() => setLiveOffline(false))
+            .catch(() => setLiveOffline(true));
+
+        const poll = window.setInterval(() => {
+            if (document.hidden) {
+                return;
+            }
+            void getGame(gameId)
+                .then((loaded) => {
+                    if (loaded.status === GameStatus.InProgress || loaded.status === GameStatus.Finished) {
+                        mergeGame(loaded);
+                    }
+                })
+                .catch(() => undefined);
+        }, 1500);
+
         return () => {
+            window.clearInterval(poll);
             void connection.stop();
         };
     }, [game?.id]);
@@ -271,56 +308,15 @@ export default function Map({ initialGameId = null }: MapProps) {
                 },
             });
 
-            // #region agent log
-            const geoLoadStartedAt = performance.now();
-            const debugLog = (
-                hypothesisId: string,
-                message: string,
-                data: Record<string, unknown>
-            ) => {
-                fetch(
-                    "http://127.0.0.1:7827/ingest/a3beda06-c7ad-4526-b257-757e72cb3335",
-                    {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "X-Debug-Session-Id": "6af24c",
-                        },
-                        body: JSON.stringify({
-                            sessionId: "6af24c",
-                            runId: "post-fix",
-                            hypothesisId,
-                            location: "Map.tsx:countries-source",
-                            message,
-                            data,
-                            timestamp: Date.now(),
-                        }),
-                    }
-                ).catch(() => {});
-            };
-            // #endregion
-
             const markCountriesReady = () => {
                 if (currentMap.isSourceLoaded("countries")) {
                     setCountriesGeometryReady(true);
-                    // #region agent log
-                    debugLog("H1-geojson-slow", "countries source loaded", {
-                        elapsedMs: Math.round(performance.now() - geoLoadStartedAt),
-                    });
-                    // #endregion
                 }
             };
             currentMap.on("sourcedata", (event) => {
                 if (event.sourceId === "countries") {
                     markCountriesReady();
                 }
-            });
-            currentMap.on("error", (event) => {
-                // #region agent log
-                debugLog("H1-geojson-slow", "maplibre error", {
-                    error: String(event.error?.message ?? event.error ?? "unknown"),
-                });
-                // #endregion
             });
             markCountriesReady();
 
@@ -678,7 +674,7 @@ export default function Map({ initialGameId = null }: MapProps) {
         setError(null);
         try {
             const next = await action();
-            setGame(next);
+            mergeGame(next);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Action failed.");
             try {
@@ -722,66 +718,14 @@ export default function Map({ initialGameId = null }: MapProps) {
             // Send the selected country ID to the backend
             const result = await createGame(String(selectedCountry.id));
 
-            // #region agent log
-            fetch(
-                "http://127.0.0.1:7827/ingest/a3beda06-c7ad-4526-b257-757e72cb3335",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-Debug-Session-Id": "6af24c",
-                    },
-                    body: JSON.stringify({
-                        sessionId: "6af24c",
-                        runId: "post-fix",
-                        hypothesisId: "H2-create-500",
-                        location: "Map.tsx:handleCreateGame",
-                        message: "createGame succeeded",
-                        data: { gameId: result.game.id },
-                        timestamp: Date.now(),
-                    }),
-                }
-            ).catch(() => {});
-            // #endregion
-    
             // Store the game returned by the backend
             setGame(result.game);
             setIsHost(true);
-    
-            // Retain the initial D20 results for future animations
-            setTurnOrderRolls(result.turnOrderRolls);
 
             // stable shareable URL for spectators
             window.history.pushState({}, "", `/game/${result.game.id}`);
-    
-            console.log("Game created successfully:", result.game.id);
         }
         catch (err) {
-            // #region agent log
-            fetch(
-                "http://127.0.0.1:7827/ingest/a3beda06-c7ad-4526-b257-757e72cb3335",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-Debug-Session-Id": "6af24c",
-                    },
-                    body: JSON.stringify({
-                        sessionId: "6af24c",
-                        runId: "post-fix",
-                        hypothesisId: "H2-create-500",
-                        location: "Map.tsx:handleCreateGame",
-                        message: "createGame failed",
-                        data: {
-                            error:
-                                err instanceof Error ? err.message : String(err),
-                        },
-                        timestamp: Date.now(),
-                    }),
-                }
-            ).catch(() => {});
-            // #endregion
-    
             setError(
                 err instanceof Error
                     ? err.message
@@ -850,73 +794,91 @@ export default function Map({ initialGameId = null }: MapProps) {
                     Loading world map…
                 </div>
             )}
-            {selectedCountry && (
-                <CountryInfoPanel
-                    selectedCountry={selectedCountry}
-                    selectedCountryData={selectedCountryData}
-                    selectedTerritory={selectedTerritory}
-                    selectedOwner={selectedOwner}
-                    gameExists={!!game}
-                    isCreatingGame={isCreatingGame}
-                    onCreateGame={() => void handleCreateGame()}
-                />
-            )}
-            {game && (
-                <FactionPanel
-                    game={game}
-                    turnOrderRollCount={turnOrderRolls.length}
-                    activeFaction={activeFaction}
-                    onFlyToCountry={flyToCountry}
-                />
-            )}
-
-            {game && selectedCountry && selectedTerritory && game.currentPhase === TurnPhase.Combat && !game.activeCombat && activeFaction?.type === FactionType.Human && (
-                <div
-                    style={{
-                        position: "absolute",
-                        left: 300,
-                        top: 20,
-                        zIndex: 12,
-                        background: "#fff",
-                        padding: 12,
-                        borderRadius: 8,
-                        boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                    }}
-                >
-                    <button
-                        type="button"
-                        disabled={actionBusy || selectedTerritory.soldiers < 1}
-                        onClick={() => {
-                            const human = game.factions.find((f) => f.type === FactionType.Human);
-                            const source = game.territories.find(
-                                (t) => t.ownerFactionId === human?.id && t.soldiers >= 2
-                            );
-                            const target = selectedTerritory;
-                            if (!source || !human || target.ownerFactionId === human.id) {
-                                setError("Pick an enemy country and own a source with 2+ soldiers.");
-                                return;
-                            }
-                            const commit = Math.max(1, source.soldiers - 1);
-                            void runGameAction(() =>
-                                startCombat(
-                                    game.id,
-                                    game.version,
-                                    source.countryId,
-                                    target.countryId,
-                                    commit
-                                )
-                            );
-                        }}
-                    >
-                        Attack selected with max force
-                    </button>
+            <div
+                style={{
+                    position: "absolute",
+                    top: 56,
+                    left: 12,
+                    width: 260,
+                    maxWidth: "calc(100vw - 24px)",
+                    maxHeight: "calc(100vh - 200px)",
+                    zIndex: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    pointerEvents: "none",
+                }}
+            >
+                <div style={{ pointerEvents: "auto" }}>
+                    {selectedCountry && (
+                        <HudPanel
+                            id="selection"
+                            title={selectedCountry.name}
+                            side="left"
+                            embedded
+                            defaultOpen
+                        >
+                            <CountryInfoPanel
+                                selectedCountry={selectedCountry}
+                                selectedCountryData={selectedCountryData}
+                                selectedTerritory={selectedTerritory}
+                                selectedOwner={selectedOwner}
+                                gameExists={!!game}
+                                isCreatingGame={isCreatingGame}
+                                onCreateGame={() => void handleCreateGame()}
+                            />
+                        </HudPanel>
+                    )}
                 </div>
-            )}
-
-            {game && <ActionLog gameId={game.id} />}
+                <div style={{ pointerEvents: "auto" }}>
+                    {game && (
+                        <HudPanel
+                            id="log"
+                            title="Log"
+                            side="left"
+                            embedded
+                            defaultOpen={false}
+                        >
+                            <ActionLog gameId={game.id} />
+                        </HudPanel>
+                    )}
+                </div>
+            </div>
 
             {game && (
-                <DiceOverlay combat={game.activeCombat} turnOrderRolls={turnOrderRolls} />
+                <HudPanel
+                    id="factions"
+                    title={`Round ${game.round}`}
+                    side="right"
+                    width={280}
+                    defaultOpen
+                >
+                    <FactionPanel
+                        game={game}
+                        activeFaction={activeFaction}
+                        onFlyToCountry={flyToCountry}
+                    />
+                </HudPanel>
+            )}
+
+            {game && (
+                <DiceOverlay
+                    combat={game.activeCombat}
+                    sourceName={
+                        game.territories.find(
+                            (t) =>
+                                t.countryId ===
+                                game.activeCombat?.sourceCountryId
+                        )?.name
+                    }
+                    destinationName={
+                        game.territories.find(
+                            (t) =>
+                                t.countryId ===
+                                game.activeCombat?.destinationCountryId
+                        )?.name
+                    }
+                />
             )}
 
             <PixiEffectsLayer
@@ -942,6 +904,31 @@ export default function Map({ initialGameId = null }: MapProps) {
                 <PhaseControls
                     game={game}
                     busy={actionBusy}
+                    canAttackSelected={Boolean(
+                        selectedTerritory &&
+                            activeFaction?.type === FactionType.Human &&
+                            selectedTerritory.ownerFactionId !==
+                                activeFaction.id &&
+                            game.territories.some(
+                                (t) =>
+                                    t.ownerFactionId === activeFaction.id &&
+                                    t.soldiers >= 2
+                            )
+                    )}
+                    battleSourceName={
+                        game.territories.find(
+                            (t) =>
+                                t.countryId ===
+                                game.activeCombat?.sourceCountryId
+                        )?.name
+                    }
+                    battleDestName={
+                        game.territories.find(
+                            (t) =>
+                                t.countryId ===
+                                game.activeCombat?.destinationCountryId
+                        )?.name
+                    }
                     onAdvance={() =>
                         void runGameAction(() =>
                             advancePhase(game.id, game.version)
@@ -949,7 +936,9 @@ export default function Map({ initialGameId = null }: MapProps) {
                     }
                     onAllocate={() => {
                         if (!selectedCountry) {
-                            setError("Select one of your countries to place troops.");
+                            setError(
+                                "Select one of your countries to place troops."
+                            );
                             return;
                         }
                         void runGameAction(() =>
@@ -976,6 +965,38 @@ export default function Map({ initialGameId = null }: MapProps) {
                             retreatCombat(game.id, game.version)
                         )
                     }
+                    onAttackSelected={() => {
+                        const human = game.factions.find(
+                            (f) => f.type === FactionType.Human
+                        );
+                        const source = game.territories.find(
+                            (t) =>
+                                t.ownerFactionId === human?.id &&
+                                t.soldiers >= 2
+                        );
+                        const target = selectedTerritory;
+                        if (
+                            !source ||
+                            !human ||
+                            !target ||
+                            target.ownerFactionId === human.id
+                        ) {
+                            setError(
+                                "Select an enemy country and own a land with 2+ soldiers."
+                            );
+                            return;
+                        }
+                        const commit = Math.max(1, source.soldiers - 1);
+                        void runGameAction(() =>
+                            startCombat(
+                                game.id,
+                                game.version,
+                                source.countryId,
+                                target.countryId,
+                                commit
+                            )
+                        );
+                    }}
                 />
             )}
 
@@ -983,8 +1004,8 @@ export default function Map({ initialGameId = null }: MapProps) {
                 <div
                     style={{
                         position: "absolute",
-                        left: 20,
-                        bottom: 20,
+                        left: 12,
+                        bottom: 12,
                         zIndex: 15,
                         background: "#111827",
                         color: "#F9FAFB",
@@ -1006,7 +1027,7 @@ export default function Map({ initialGameId = null }: MapProps) {
                     }}
                     style={{
                         position: "absolute",
-                        top: 20,
+                        top: 12,
                         left: "50%",
                         transform: "translateX(-50%)",
                         zIndex: 16,
@@ -1022,14 +1043,34 @@ export default function Map({ initialGameId = null }: MapProps) {
                 </button>
             )}
 
+            {liveOffline && game && (
+                <div
+                    style={{
+                        position: "absolute",
+                        top: 12,
+                        right: 310,
+                        zIndex: 16,
+                        background: "#FEF3C7",
+                        color: "#92400E",
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        maxWidth: 220,
+                    }}
+                >
+                    Live feed offline — refreshing…
+                </div>
+            )}
+
             {error && (
                 <div
                     style={{
                         position: "absolute",
-                        bottom: 20,
-                        left: 20,
+                        top: 52,
+                        left: "50%",
+                        transform: "translateX(-50%)",
                         padding: 12,
-                        maxWidth: 350,
+                        maxWidth: 360,
                         backgroundColor: "#FEE2E2",
                         color: "#991B1B",
                         borderRadius: 8,

@@ -13,8 +13,18 @@ type Props = {
     gameId: string;
 };
 
+const FRIENDLY: Record<string, string> = {
+    AdvancePhase: "Phase advanced",
+    AllocateReinforcements: "Troops placed",
+    TransferSoldiers: "Troops moved",
+    StartCombat: "Battle started",
+    ResolveCombatRound: "Combat round",
+    RetreatCombat: "Attacker retreated",
+    SetNpcSpeed: "NPC speed changed",
+};
+
 // -------------------------------------------------------------------------
-// ActionLog — left strip of server events, newest at the bottom-ish
+// ActionLog — short player-facing event lines
 // -------------------------------------------------------------------------
 export default function ActionLog({ gameId }: Props) {
     const [events, setEvents] = useState<GameEventRow[]>([]);
@@ -25,7 +35,9 @@ export default function ActionLog({ gameId }: Props) {
         async function load() {
             try {
                 const response = await fetch(
-                    apiUrl(`/api/games/${encodeURIComponent(gameId)}/events?afterSequence=0`),
+                    apiUrl(
+                        `/api/games/${encodeURIComponent(gameId)}/events?afterSequence=0`
+                    ),
                     { credentials: "include" }
                 );
                 if (!response.ok) {
@@ -49,25 +61,8 @@ export default function ActionLog({ gameId }: Props) {
     }, [gameId]);
 
     return (
-        <div
-            style={{
-                position: "absolute",
-                left: 20,
-                top: 200,
-                width: 240,
-                maxHeight: "40vh",
-                overflowY: "auto",
-                padding: 10,
-                background: "rgba(255,255,255,0.92)",
-                color: "#111",
-                borderRadius: 8,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                zIndex: 11,
-                fontSize: 12,
-            }}
-        >
-            <strong>Action log</strong>
-            <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
+        <div>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                 {events.map((event) => (
                     <li
                         key={event.eventId}
@@ -76,13 +71,17 @@ export default function ActionLog({ gameId }: Props) {
                             padding: "4px 0",
                         }}
                     >
-                        <div style={{ fontWeight: 600 }}>{event.type}</div>
-                        <div style={{ opacity: 0.65 }}>
+                        <div style={{ fontWeight: 600 }}>
+                            {FRIENDLY[event.type] ?? event.type}
+                        </div>
+                        <div style={{ opacity: 0.65, fontSize: 11 }}>
                             {new Date(event.occurredAtUtc).toLocaleTimeString()}
                         </div>
                     </li>
                 ))}
-                {events.length === 0 && <li>No events yet.</li>}
+                {events.length === 0 && (
+                    <li style={{ opacity: 0.65 }}>No moves yet.</li>
+                )}
             </ul>
         </div>
     );

@@ -3,14 +3,19 @@ import type { CombatState } from "../types/game";
 
 type Props = {
     combat?: CombatState | null;
-    turnOrderRolls?: { factionId: string; roll: number; rollStage: number }[];
+    sourceName?: string;
+    destinationName?: string;
 };
 
 // -------------------------------------------------------------------------
-// DiceOverlay — factual CSS dice until Pixi gets a proper pass
+// DiceOverlay — combat dice only (turn-order D20s stay off the HUD)
 // -------------------------------------------------------------------------
-export default function DiceOverlay({ combat, turnOrderRolls }: Props) {
-    if (!combat && (!turnOrderRolls || turnOrderRolls.length === 0)) {
+export default function DiceOverlay({
+    combat,
+    sourceName,
+    destinationName,
+}: Props) {
+    if (!combat) {
         return null;
     }
 
@@ -19,7 +24,7 @@ export default function DiceOverlay({ combat, turnOrderRolls }: Props) {
             style={{
                 position: "absolute",
                 left: "50%",
-                bottom: 110,
+                bottom: 120,
                 transform: "translateX(-50%)",
                 zIndex: 18,
                 background: "rgba(17,17,17,0.88)",
@@ -31,43 +36,30 @@ export default function DiceOverlay({ combat, turnOrderRolls }: Props) {
                 pointerEvents: "none",
             }}
         >
-            {combat && (
-                <>
-                    <div style={{ fontWeight: 700, marginBottom: 6 }}>Combat dice</div>
-                    <div>
-                        Attacker:{" "}
-                        {(combat.lastAttackerDice ?? []).map((d, i) => (
-                            <span key={`a${i}`} style={dieStyle}>
-                                {d}
-                            </span>
-                        ))}
-                    </div>
-                    <div style={{ marginTop: 6 }}>
-                        Defender:{" "}
-                        {(combat.lastDefenderDice ?? []).map((d, i) => (
-                            <span key={`d${i}`} style={dieStyle}>
-                                {d}
-                            </span>
-                        ))}
-                    </div>
-                    <div style={{ marginTop: 8, fontSize: 13, opacity: 0.9 }}>
-                        Losses A {combat.lastAttackerLosses} / D {combat.lastDefenderLosses}
-                    </div>
-                </>
-            )}
-
-            {!combat && turnOrderRolls && turnOrderRolls.length > 0 && (
-                <>
-                    <div style={{ fontWeight: 700, marginBottom: 6 }}>D20 turn order</div>
-                    <div style={{ maxHeight: 120, overflow: "auto", fontSize: 13 }}>
-                        {turnOrderRolls.map((roll, index) => (
-                            <div key={`${roll.factionId}-${index}`}>
-                                Stage {roll.rollStage}: {roll.roll}
-                            </div>
-                        ))}
-                    </div>
-                </>
-            )}
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                {sourceName ?? combat.sourceCountryId} →{" "}
+                {destinationName ?? combat.destinationCountryId}
+            </div>
+            <div>
+                Attacker:{" "}
+                {(combat.lastAttackerDice ?? []).map((d, i) => (
+                    <span key={`a${i}`} style={dieStyle}>
+                        {d}
+                    </span>
+                ))}
+            </div>
+            <div style={{ marginTop: 6 }}>
+                Defender:{" "}
+                {(combat.lastDefenderDice ?? []).map((d, i) => (
+                    <span key={`d${i}`} style={dieStyle}>
+                        {d}
+                    </span>
+                ))}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 13, opacity: 0.9 }}>
+                Losses A {combat.lastAttackerLosses} / D{" "}
+                {combat.lastDefenderLosses}
+            </div>
         </div>
     );
 }

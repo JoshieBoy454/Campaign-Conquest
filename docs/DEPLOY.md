@@ -208,10 +208,12 @@ If `/hubs/*` is missing as a CF behavior, negotiate/WebSocket calls fall through
 
 - [ ] `https://dllta4qw5dvjv.cloudfront.net/api/games/countries` → JSON
 - [ ] CloudFront homepage loads React (not S3 XML / AccessDenied)
-- [ ] Map + `countries.geojson` load
-- [ ] New Game works; host cookie survives refresh
+- [ ] Map + `countries.geojson` load (expect a short “Loading world map…” then polygons)
+- [ ] New Game / Start Game works (API must include GuidSerializer fix); host cookie survives refresh
+- [ ] After start, NPCs advance turns without freezing human actions
+- [ ] HUD panels minimize/restore; no D20 turn-order spam on screen
 - [ ] Spectator link in another browser is read-only
-- [ ] SignalR connects (`/hubs/games`)
+- [ ] SignalR connects (`/hubs/games`) — requires CloudFront `/hubs/*` → EC2; UI also polls as fallback
 - [ ] Atlas shows game documents after create
 - [ ] Gemini commentary works or fails open (factual log still shows)
 

@@ -1,10 +1,17 @@
-import type { Faction, GameState, Territory } from "../types/game";
+import { TurnPhase, type Faction, type GameState, type Territory } from "../types/game";
 
 type Props = {
     game: GameState;
-    turnOrderRollCount: number;
     activeFaction?: Faction;
     onFlyToCountry: (countryId: string, countryName: string) => void;
+};
+
+const PHASE_LABELS: Record<number, string> = {
+    [TurnPhase.Upkeep]: "Upkeep",
+    [TurnPhase.ReinforcementOne]: "Reinforce",
+    [TurnPhase.Combat]: "Combat",
+    [TurnPhase.ReinforcementTwo]: "Post-combat",
+    [TurnPhase.EndTurn]: "End turn",
 };
 
 // -------------------------------------------------------------------------
@@ -12,37 +19,25 @@ type Props = {
 // -------------------------------------------------------------------------
 export default function FactionPanel({
     game,
-    turnOrderRollCount,
     activeFaction,
     onFlyToCountry,
 }: Props) {
     return (
-        <div
-            style={{
-                position: "absolute",
-                top: 20,
-                right: 20,
-                padding: 16,
-                width: 300,
-                maxWidth: "calc(100vw - 40px)",
-                maxHeight: "calc(100vh - 40px)",
-                overflowY: "auto",
-                boxSizing: "border-box",
-                backgroundColor: "#FFFFFF",
-                color: "#111111",
-                borderRadius: 8,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                zIndex: 10,
-            }}
-        >
-            <h3>Campaign Conquest</h3>
-            <p>Round: {game.round}</p>
-            <p>Current Turn: {activeFaction?.name ?? "Unknown"}</p>
-            <p>Phase: {game.currentPhase}</p>
-            <p>Pool: {game.reinforcementPool}</p>
-            <p>D20 Rolls Recorded: {turnOrderRollCount}</p>
-            <hr />
-            <h4>Factions</h4>
+        <div>
+            <p style={{ margin: "0 0 6px" }}>Round {game.round}</p>
+            <p style={{ margin: "0 0 6px" }}>
+                Turn: <strong>{activeFaction?.name ?? "—"}</strong>
+            </p>
+            <p style={{ margin: "0 0 6px" }}>
+                Phase: {PHASE_LABELS[game.currentPhase] ?? "—"}
+            </p>
+            {game.reinforcementPool > 0 && (
+                <p style={{ margin: "0 0 10px" }}>
+                    Reinforcement pool: {game.reinforcementPool}
+                </p>
+            )}
+            <hr style={{ border: "none", borderTop: "1px solid #E2E8F0" }} />
+            <h4 style={{ margin: "10px 0 8px" }}>Factions</h4>
 
             {[...game.factions]
                 .sort((a, b) => a.turnPosition - b.turnPosition)
@@ -54,6 +49,7 @@ export default function FactionPanel({
                         (total, territory) => total + territory.soldiers,
                         0
                     );
+                    const isActive = faction.id === activeFaction?.id;
 
                     return (
                         <div
@@ -63,6 +59,9 @@ export default function FactionPanel({
                                 paddingBottom: 8,
                                 borderBottom: "1px solid #DDDDDD",
                                 opacity: faction.isDefeated ? 0.45 : 1,
+                                background: isActive ? "#F0F9FF" : "transparent",
+                                borderRadius: 4,
+                                padding: isActive ? "6px 4px" : undefined,
                             }}
                         >
                             <div
@@ -84,9 +83,13 @@ export default function FactionPanel({
                                 <strong>
                                     {faction.turnPosition}. {faction.name}
                                     {faction.isDefeated ? " (defeated)" : ""}
+                                    {isActive ? " ←" : ""}
                                 </strong>
                             </div>
-                            <p>Total Soldiers: {totalSoldiers}</p>
+                            <p style={{ margin: "4px 0" }}>
+                                Armies: {totalSoldiers} · Lands:{" "}
+                                {ownedTerritories.length}
+                            </p>
                             {ownedTerritories.map((territory) => (
                                 <button
                                     key={territory.countryId}

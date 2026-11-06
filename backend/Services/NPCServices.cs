@@ -13,6 +13,8 @@ public interface INpcDecisionPolicy {
 
 public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
 
+    private const int MaxPhaseSteps = 20;
+
     public void PlayTurn(GameState game, Guid npcFactionId, TurnService turnService, CombatService combatService) {
 
         if (game.CurrentFactionId != npcFactionId) {
@@ -25,34 +27,69 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
             return;
         }
 
-        while (game.Status == GameStatus.InProgress && game.CurrentFactionId == npcFactionId) {
+        int steps = 0;
 
-            switch (game.CurrentPhase) {
+        while (
+            game.Status == GameStatus.InProgress
+            && game.CurrentFactionId == npcFactionId
+            && steps++ < MaxPhaseSteps) {
 
-                case TurnPhase.Upkeep:
-                    turnService.AdvancePhase(game, npcFactionId);
-                    break;
+            try {
+                switch (game.CurrentPhase) {
 
-                case TurnPhase.ReinforcementOne:
-                case TurnPhase.ReinforcementTwo:
-                    SpendReinforcementPool(game, npcFactionId, turnService);
-                    turnService.AdvancePhase(game, npcFactionId);
-                    break;
+                    case TurnPhase.Upkeep:
+                        turnService.AdvancePhase(game, npcFactionId);
+                        break;
 
-                case TurnPhase.Combat:
-                    TryCombatOrSkip(game, npcFactionId, combatService);
-                    break;
+                    case TurnPhase.ReinforcementOne:
+                    case TurnPhase.ReinforcementTwo:
+                        SpendReinforcementPool(game, npcFactionId, turnService);
+                        turnService.AdvancePhase(game, npcFactionId);
+                        break;
 
-                case TurnPhase.EndTurn:
-                    turnService.AdvancePhase(game, npcFactionId);
-                    break;
+                    case TurnPhase.Combat:
+                        // One combat attempt per turn, then always leave Combat
+                        TryCombatOrSkip(game, npcFactionId, combatService);
 
-                default:
-                    return;
+                        if (game.ActiveCombat != null) {
+                            ResolveCombatUntilDone(game, npcFactionId, combatService);
+                        }
+
+                        // Retreat / fail leave phase on Combat — force advance
+                        if (
+                            game.Status == GameStatus.InProgress
+                            && game.CurrentFactionId == npcFactionId
+                            && game.CurrentPhase == TurnPhase.Combat
+                            && game.ActiveCombat == null) {
+                            combatService.SkipCombat(game, npcFactionId);
+                        }
+                        break;
+
+                    case TurnPhase.EndTurn:
+                        turnService.AdvancePhase(game, npcFactionId);
+                        break;
+
+                    default:
+                        return;
+                }
             }
-
-            if (game.ActiveCombat != null) {
-                ResolveCombatUntilDone(game, npcFactionId, combatService);
+            catch (InvalidOperationException) {
+                // Bad mid-turn state — abandon this NPC turn rather than spin
+                if (
+                    game.Status == GameStatus.InProgress
+                    && game.CurrentFactionId == npcFactionId
+                    && game.CurrentPhase == TurnPhase.Combat
+                    && game.ActiveCombat == null) {
+                    try {
+                        combatService.SkipCombat(game, npcFactionId);
+                    }
+                    catch (InvalidOperationException) {
+                        return;
+                    }
+                }
+                else {
+                    return;
+                }
             }
         }
     }
@@ -99,6 +136,12 @@ public class SimpleNpcDecisionPolicy : INpcDecisionPolicy {
 
         int commit = Math.Min(source.Soldiers - 1, 2);
 
+        // Don't start a fight we would immediately retreat from
+        if (commit <= target.Soldiers) {
+            combatService.SkipCombat(game, factionId);
+            return;
+        }
+
         try {
             combatService.StartCombat(game, factionId, source.CountryId, target.CountryId, commit);
         }
@@ -138,6 +181,7 @@ public class NpcTurnHostedService : BackgroundService {
     private readonly IGameRepository _gameRepository;
     private readonly GameConcurrencyGate _concurrencyGate;
     private readonly IGameStateNotifier _gameStateNotifier;
+    private readonly ILogger<NpcTurnHostedService> _logger;
 
     private static readonly TimeSpan BaseDelay = TimeSpan.FromMilliseconds(750);
 
@@ -145,11 +189,13 @@ public class NpcTurnHostedService : BackgroundService {
         IServiceScopeFactory scopeFactory,
         IGameRepository gameRepository,
         GameConcurrencyGate concurrencyGate,
-        IGameStateNotifier gameStateNotifier) {
+        IGameStateNotifier gameStateNotifier,
+        ILogger<NpcTurnHostedService> logger) {
         _scopeFactory = scopeFactory;
         _gameRepository = gameRepository;
         _concurrencyGate = concurrencyGate;
         _gameStateNotifier = gameStateNotifier;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
@@ -176,6 +222,9 @@ public class NpcTurnHostedService : BackgroundService {
 
                 try {
                     await RunNpcTurn(snapshot.Id, current.Id, stoppingToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException) {
+                    _logger.LogWarning(ex, "NPC turn failed for game {GameId}", snapshot.Id);
                 }
                 finally {
                     gate.Release();
