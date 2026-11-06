@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Map as MapLibreMap, setWorkerUrl } from "maplibre-gl";
+import { Map as MapLibreMap, Marker, setWorkerUrl } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createGame, getCountries } from "../services/gameApi";
+import { pointOnFeature } from "@turf/point-on-feature";
+import type { FeatureCollection } from "geojson";
 
 import type {
     CountryDefinition,
@@ -30,6 +32,14 @@ export default function Map() {
 
     // Stroes the previous id of selected country
     const previousSelectionRef = useRef<string | number | null>(null); // is initialy null for same reason as directly above
+
+    const troopMarkersRef = useRef<Marker[]>([]);
+
+    const countryCentersRef = useRef<Map<string, [number, number]>>(
+        new Map()
+    );
+
+    const [countryCentersReady, setCountryCentersReady] = useState(false);
 
     //Stores the playable countries and their population information
     const [countries, setCountries] = useState<CountryDefinition[]>([]);
@@ -268,6 +278,91 @@ export default function Map() {
             map.current = null;
         };
     }, []);
+
+
+    useEffect(() => {
+
+        // Allows the fetch request to be cancelled during cleanup
+        const controller = new AbortController();
+    
+        async function loadCountryCenters() {
+    
+            try {
+    
+                // Retrieve the same GeoJSON file rendered by MapLibre
+                const response = await fetch("/countries.geojson", {
+                    signal: controller.signal
+                });
+    
+                if (!response.ok) {
+                    throw new Error("Unable to load country geometries.");
+                }
+    
+                const geoJson =
+                    await response.json() as FeatureCollection;
+    
+                // Dictionary mapping ISO country IDs to longitude/latitude
+                const centers = new Map<string, [number, number]>();
+    
+                // Loop through the geographic features.
+                for (const feature of geoJson.features) {
+    
+                    // Retrieve the same ID used by MapLibre's promoteId
+                    const countryId = String(
+                        feature.properties?.["ISO3166-1-Alpha-3"] ?? ""
+                    ).toUpperCase();
+    
+                    // Skip features without a valid ISO alpha-3 ID
+                    if (!/^[A-Z]{3}$/.test(countryId)) {
+                        continue;
+                    }
+    
+                    // Only polygon geometries represent country areas
+                    if (
+                        feature.geometry?.type !== "Polygon" &&
+                        feature.geometry?.type !== "MultiPolygon"
+                    ) {
+                        continue;
+                    }
+    
+                    // Calculate a point located on the country's geometry
+                    const point = pointOnFeature(feature);
+    
+                    const [longitude, latitude] = point.geometry.coordinates;
+    
+                    // Store the geographic location for later use
+                    centers.set(countryId, [longitude, latitude]);
+                }
+    
+                // Only update state if the request wasn't cancelled
+                if (!controller.signal.aborted) {
+                    countryCentersRef.current = centers;
+                    setCountryCentersReady(true);
+                }
+            }
+            catch (err) {
+    
+                // Ignore expected cancellation errors
+                if (controller.signal.aborted) {
+                    return;
+                }
+    
+                setError(
+                    err instanceof Error
+                        ? err.message
+                        : "Unable to load country coordinates."
+                );
+            }
+        }
+    
+        void loadCountryCenters();
+    
+        return () => {
+            controller.abort();
+        };
+    
+    }, []);
+
 
     useEffect(() => {
 
