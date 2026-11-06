@@ -8,9 +8,9 @@
 - NPC autoplay hosted service (Phase E)
 - MongoDB repositories (optional via `MongoDb:ConnectionString`) + in-memory fallback (Phase F)
 - Host HttpOnly cookie + SignalR game hub (Phase G)
-- Landing route, spectator banner, CSS dice overlay (Phase H starter)
-- Gemini commentary adapter (optional key) (Phase I)
-- xUnit combat dice tests (Phase J starter)
+- Landing route, spectator banner, CSS dice, Pixi clash flash, action log, victory overlay (Phase H)
+- Gemini commentary adapter queued after combat rounds (Phase I)
+- xUnit combat + population rule tests (Phase J)
 - AWS Cape Town deploy notes in `docs/DEPLOY.md` (Phase K)
 
 ## Rollback
