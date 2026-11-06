@@ -1,0 +1,49 @@
+name: Deploy API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish
+        run: |
+          dotnet publish backend/CampaignConquest.Api.csproj -c Release -o ./publish-api
+
+      - name: Package artifact
+        run: |
+          tar -czf api.tgz -C publish-api .
+
+      - name: Upload to EC2 and restart
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$EC2_HOST" ]; then
+            echo "EC2_SSH_KEY / EC2_HOST secrets missing — skipping remote deploy."
+            exit 0
+          fi
+          USERNAME="${EC2_USER:-ubuntu}"
+          install -m 600 /dev/null /tmp/ec2.pem
+          printf '%s\n' "$SSH_KEY" > /tmp/ec2.pem
+          scp -o StrictHostKeyChecking=no -i /tmp/ec2.pem api.tgz "$USERNAME@$EC2_HOST:/tmp/campaign-api.tgz"
+          ssh -o StrictHostKeyChecking=no -i /tmp/ec2.pem "$USERNAME@$EC2_HOST" <<'EOF'
+            set -e
+            sudo mkdir -p /var/www/campaign-api
+            sudo tar -xzf /tmp/campaign-api.tgz -C /var/www/campaign-api
+            sudo systemctl restart campaign-api
+            sudo systemctl --no-pager status campaign-api || true
+          EOF

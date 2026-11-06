@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { FactionType, TurnPhase, type GameState } from "../types/game";
 
 type Props = {
@@ -23,9 +22,6 @@ const PHASE_LABELS: Record<number, string> = {
     [TurnPhase.EndTurn]: "End Turn",
 };
 
-// -------------------------------------------------------------------------
-// PhaseControls — bottom action strip for the host on their turn
-// -------------------------------------------------------------------------
 export default function PhaseControls({
     game,
     busy,
@@ -45,102 +41,69 @@ export default function PhaseControls({
     const phaseLabel = PHASE_LABELS[game.currentPhase] ?? "—";
 
     return (
-        <div
-            style={{
-                position: "absolute",
-                left: 12,
-                bottom: 12,
-                zIndex: 15,
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                maxWidth: 380,
-            }}
-        >
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {Object.entries(PHASE_LABELS).map(([key, label]) => {
-                    const phase = Number(key);
-                    const active = game.currentPhase === phase;
-                    const combatish = phase === TurnPhase.Combat;
-                    return (
-                        <div
-                            key={key}
-                            style={{
-                                width: 64,
-                                height: 52,
-                                borderRadius: 8,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                textAlign: "center",
-                                fontSize: 11,
-                                fontWeight: 700,
-                                color: "#fff",
-                                backgroundColor: active
-                                    ? combatish
-                                        ? "#B91C1C"
-                                        : "#1160BF"
-                                    : "#9CA3AF",
-                                boxShadow: active
-                                    ? "0 0 0 2px #111 inset"
-                                    : "none",
-                            }}
-                        >
-                            {label}
-                        </div>
-                    );
-                })}
-            </div>
+        <div className="holo-panel" style={{ padding: 0 }}>
+            <div className="holo-panel-header">Phase controls</div>
+            <div className="holo-panel-body">
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                    {Object.entries(PHASE_LABELS).map(([key, label]) => {
+                        const phase = Number(key);
+                        const active = game.currentPhase === phase;
+                        return (
+                            <div
+                                key={key}
+                                style={{
+                                    flex: "1 1 64px",
+                                    minWidth: 56,
+                                    height: 44,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    textAlign: "center",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    letterSpacing: "0.04em",
+                                    textTransform: "uppercase",
+                                    color: active ? "#041018" : "var(--holo-muted)",
+                                    background: active
+                                        ? phase === TurnPhase.Combat
+                                            ? "var(--holo-danger)"
+                                            : "var(--holo-accent)"
+                                        : "rgba(255,255,255,0.06)",
+                                    border: `1px solid ${active ? "var(--holo-border)" : "var(--holo-border-dim)"}`,
+                                }}
+                            >
+                                {label}
+                            </div>
+                        );
+                    })}
+                </div>
 
-            <div
-                style={{
-                    background: "#FFFFFF",
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                    color: "#111",
-                }}
-            >
                 <strong>
                     {isHumanTurn
                         ? `Your turn — ${phaseLabel}`
-                        : `${current?.name ?? "NPC"} playing — ${phaseLabel}`}
+                        : `${current?.name ?? "NPC"} — ${phaseLabel}`}
                 </strong>
-                {game.reinforcementPool > 0 && (
-                    <div>Troops to place: {game.reinforcementPool}</div>
-                )}
                 {combatActive && (
-                    <div>
-                        Battle: {battleSourceName ?? game.activeCombat?.sourceCountryId}{" "}
-                        →{" "}
-                        {battleDestName ??
-                            game.activeCombat?.destinationCountryId}{" "}
-                        ({game.activeCombat?.attackerSoldiers} committed)
+                    <div className="holo-muted" style={{ marginTop: 4 }}>
+                        {battleSourceName ?? game.activeCombat?.sourceCountryId} →{" "}
+                        {battleDestName ?? game.activeCombat?.destinationCountryId}
                     </div>
                 )}
 
                 {isHumanTurn && (
-                    <div
-                        style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: 6,
-                            marginTop: 8,
-                        }}
-                    >
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                         {(game.currentPhase === TurnPhase.Upkeep ||
                             game.currentPhase === TurnPhase.EndTurn ||
                             (game.currentPhase === TurnPhase.ReinforcementOne &&
                                 game.reinforcementPool === 0) ||
                             (game.currentPhase === TurnPhase.ReinforcementTwo &&
                                 game.reinforcementPool === 0) ||
-                            (game.currentPhase === TurnPhase.Combat &&
-                                !combatActive)) && (
+                            (game.currentPhase === TurnPhase.Combat && !combatActive)) && (
                             <button
                                 type="button"
+                                className="holo-btn holo-btn-primary"
                                 disabled={busy}
                                 onClick={onAdvance}
-                                style={primaryBtn}
                             >
                                 {game.currentPhase === TurnPhase.Combat
                                     ? "Skip combat"
@@ -155,76 +118,60 @@ export default function PhaseControls({
                             game.reinforcementPool > 0 && (
                                 <button
                                     type="button"
+                                    className="holo-btn holo-btn-primary"
                                     disabled={busy}
                                     onClick={onAllocate}
-                                    style={primaryBtn}
                                 >
                                     Place 1 on selected
                                 </button>
                             )}
 
-                        {game.currentPhase === TurnPhase.Combat &&
-                            !combatActive && (
-                                <>
-                                    <button
-                                        type="button"
-                                        disabled={busy || !canAttackSelected}
-                                        onClick={onAttackSelected}
-                                        style={primaryBtn}
-                                    >
-                                        Attack selected
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={busy}
-                                        onClick={onSkipCombat}
-                                    >
-                                        Skip combat
-                                    </button>
-                                </>
-                            )}
+                        {game.currentPhase === TurnPhase.Combat && !combatActive && (
+                            <>
+                                <button
+                                    type="button"
+                                    className="holo-btn holo-btn-primary"
+                                    disabled={busy || !canAttackSelected}
+                                    onClick={onAttackSelected}
+                                >
+                                    Attack selected
+                                </button>
+                                <button
+                                    type="button"
+                                    className="holo-btn"
+                                    disabled={busy}
+                                    onClick={onSkipCombat}
+                                >
+                                    Skip combat
+                                </button>
+                            </>
+                        )}
 
-                        {game.currentPhase === TurnPhase.Combat &&
-                            combatActive && (
-                                <>
-                                    <button
-                                        type="button"
-                                        disabled={busy}
-                                        onClick={onRollCombat}
-                                        style={primaryBtn}
-                                    >
-                                        Roll dice
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={busy}
-                                        onClick={onRetreat}
-                                    >
-                                        Retreat
-                                    </button>
-                                </>
-                            )}
-                    </div>
-                )}
-
-                {!isHumanTurn && (
-                    <div style={{ marginTop: 6, opacity: 0.75, fontSize: 13 }}>
-                        Waiting for NPCs…
+                        {game.currentPhase === TurnPhase.Combat && combatActive && (
+                            <>
+                                <button
+                                    type="button"
+                                    className="holo-btn holo-btn-primary"
+                                    disabled={busy}
+                                    onClick={onRollCombat}
+                                >
+                                    Roll dice
+                                </button>
+                                <button
+                                    type="button"
+                                    className="holo-btn"
+                                    disabled={busy}
+                                    onClick={onRetreat}
+                                >
+                                    Retreat
+                                </button>
+                            </>
+                        )}
                     </div>
                 )}
             </div>
         </div>
     );
 }
-
-const primaryBtn: CSSProperties = {
-    padding: "8px 12px",
-    borderRadius: 6,
-    border: "none",
-    background: "#1160BF",
-    color: "#fff",
-    fontWeight: 700,
-    cursor: "pointer",
-};
 
 //-----------------------------------------------------------------End of File----------------------------------------------------------------->

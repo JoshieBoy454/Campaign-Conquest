@@ -42,7 +42,10 @@ public class GameInitializationService {
     // Method: CreateGame
     // Create the factions?players and assigns their countries and turn orders
     // -----------------------------------------------------------------------------
-    public GameInitializationResult CreateGame(string selectedCountryId, IReadOnlyCollection<CountryDefinition> countries) {
+    public GameInitializationResult CreateGame(
+        string selectedCountryId,
+        IReadOnlyCollection<CountryDefinition> countries,
+        string? playerName = null) {
 
         ArgumentNullException.ThrowIfNull(countries);
 
@@ -90,8 +93,15 @@ public class GameInitializationService {
             Status = GameStatus.Initialising
         };
 
-        // Creates the human faction
-        Faction human = CreateFaction("Player", FactionType.Human, FactionColors[0]);
+        // Creates the human faction (in-game display name from the menu)
+        string humanName = string.IsNullOrWhiteSpace(playerName)
+            ? "Player"
+            : playerName.Trim();
+        if (humanName.Length > 32) {
+            humanName = humanName[..32];
+        }
+
+        Faction human = CreateFaction(humanName, FactionType.Human, FactionColors[0]);
 
         game.Factions.Add(human);
 

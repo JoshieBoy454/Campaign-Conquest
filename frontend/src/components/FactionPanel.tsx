@@ -36,8 +36,8 @@ export default function FactionPanel({
                     Reinforcement pool: {game.reinforcementPool}
                 </p>
             )}
-            <hr style={{ border: "none", borderTop: "1px solid #E2E8F0" }} />
-            <h4 style={{ margin: "10px 0 8px" }}>Factions</h4>
+            <hr style={{ border: "none", borderTop: "1px solid var(--holo-border-dim)" }} />
+            <h4 style={{ margin: "10px 0 8px", color: "var(--holo-accent)" }}>Factions</h4>
 
             {[...game.factions]
                 .sort((a, b) => a.turnPosition - b.turnPosition)
@@ -57,9 +57,9 @@ export default function FactionPanel({
                             style={{
                                 marginBottom: 12,
                                 paddingBottom: 8,
-                                borderBottom: "1px solid #DDDDDD",
+                                borderBottom: "1px solid var(--holo-border-dim)",
                                 opacity: faction.isDefeated ? 0.45 : 1,
-                                background: isActive ? "#F0F9FF" : "transparent",
+                                background: isActive ? "rgba(46,230,255,0.12)" : "transparent",
                                 borderRadius: 4,
                                 padding: isActive ? "6px 4px" : undefined,
                             }}
@@ -106,10 +106,10 @@ export default function FactionPanel({
                                         textAlign: "left",
                                         margin: "4px 0",
                                         padding: "4px 6px",
-                                        border: "1px solid #DDDDDD",
+                                        border: "1px solid var(--holo-border-dim)",
                                         borderRadius: 4,
-                                        background: "#F7F7F7",
-                                        color: "#111111",
+                                        background: "rgba(0,0,0,0.25)",
+                                        color: "var(--holo-text)",
                                         cursor: "pointer",
                                     }}
                                 >

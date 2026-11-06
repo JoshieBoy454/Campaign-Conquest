@@ -10,7 +10,9 @@ import {
     getGame,
     retreatCombat,
     rollCombat,
+    setNpcSpeed,
     startCombat,
+    transferSoldiers,
 } from "../services/gameApi";
 import { connectGameHub } from "../services/gameHub";
 import { apiUrl } from "../services/apiBase";
@@ -21,209 +23,171 @@ import FactionPanel from "./FactionPanel";
 import PhaseControls from "./PhaseControls";
 import DiceOverlay from "./DiceOverlay";
 import ActionLog from "./ActionLog";
+import BattleCommentary from "./BattleCommentary";
 import PixiEffectsLayer from "./PixiEffectsLayer";
+import PixiArmyLayer from "./PixiArmyLayer";
 import GameEndOverlay from "./GameEndOverlay";
-import HudPanel from "./HudPanel";
-
-import type {
-    CountryDefinition,
-    GameState,
-} from "../types/game";
-import { FactionType, GameStatus } from "../types/game";
-
+import HoloPanel from "./holo/HoloPanel";
+import TroopPool from "./TroopPool";
+import {
+    addCountryLayers,
+    loadCountryGeoJson,
+    registerTerrainImages,
+    setParticipation,
+} from "../map/setupCountryLayers";
+import type { CountryDefinition, GameState } from "../types/game";
+import { FactionType, TurnPhase } from "../types/game";
 
 setWorkerUrl(workerUrl);
 
+type MapMode = "menu" | "select" | "play";
+
 type MapProps = {
+    mode?: MapMode;
+    playerName?: string;
     initialGameId?: string | null;
 };
 
-export default function Map({ initialGameId = null }: MapProps) {
+type LngLatPair = [number, number];
 
-    // Stores a reference to the map container element
-    // Maplibre requirees an ecisting HTML element to render into
+export default function Map({
+    mode = "select",
+    playerName = "",
+    initialGameId = null,
+}: MapProps) {
     const mapContainerRef = useRef<HTMLDivElement>(null);
+    const map = useRef<MapLibreMap | null>(null);
+    const geoRef = useRef<FeatureCollection | null>(null);
+    const catalogueIsosRef = useRef<Set<string>>(new Set());
+    const previousSelectionRef = useRef<string | number | null>(null);
+    const troopMarkersRef = useRef<Marker[]>([]);
+    const countryCentersRef = useRef<Record<string, LngLatPair>>({});
+    const driftTimerRef = useRef<number | null>(null);
+    const dragRef = useRef<{
+        sourceId: string;
+        start: { x: number; y: number };
+    } | null>(null);
 
-    //Stores the Maplibre/Mapbox map instance
-    const map = useRef<MapLibreMap | null>(null); // teh initial value is null because the map hasnt been created yet
-
-    // Stores which country is currently selected 
     const [selectedCountry, setSelectedCountry] = useState<{
         id: string | number;
         name: string;
-    } | null>(null) // Is initially null because nothign is selected
-
-    // Stroes the previous id of selected country
-    const previousSelectionRef = useRef<string | number | null>(null); // is initialy null for same reason as directly above
-
-    const troopMarkersRef = useRef<Marker[]>([]);
-
-    // plain object on purpose — naming this Map() shadows JS Map and breaks new Map()
-    type LngLatPair = [number, number];
-    const countryCentersRef = useRef<Record<string, LngLatPair>>({});
-
-    const [countryCentersReady, setCountryCentersReady] = useState(false);
-
-    //Stores the playable countries and their population information
+    } | null>(null);
     const [countries, setCountries] = useState<CountryDefinition[]>([]);
-
-    //Stores the current game returned by thebackend
     const [game, setGame] = useState<GameState | null>(null);
-
     const [isCreatingGame, setIsCreatingGame] = useState(false);
     const [actionBusy, setActionBusy] = useState(false);
-
     const [error, setError] = useState<string | null>(null);
     const [isHost, setIsHost] = useState(true);
     const [liveOffline, setLiveOffline] = useState(false);
-
-    // Indicates that MapLibre has finished creating its map layers
     const [mapReady, setMapReady] = useState(false);
-
-    // countries.geojson is ~40MB on CDN — show a loader until polygons paint
     const [countriesGeometryReady, setCountriesGeometryReady] = useState(false);
+    const [countryCentersReady, setCountryCentersReady] = useState(false);
+    const [presentationSpeed, setPresentationSpeed] = useState<1 | 2>(1);
+    const [dragLine, setDragLine] = useState<{
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        valid: boolean;
+    } | null>(null);
 
     function mergeGame(next: GameState) {
-        setGame((prev) => {
-            if (!prev || next.version >= prev.version) {
-                return next;
-            }
-            return prev;
-        });
+        setGame((prev) => (!prev || next.version >= prev.version ? next : prev));
     }
 
-    // spectate / refresh — pull the game if we landed on /game/:id
+    // Load catalogue
     useEffect(() => {
-        if (!initialGameId) {
-            return;
-        }
         let cancelled = false;
-        void getGame(initialGameId)
-            .then((loaded) => {
-                if (!cancelled) {
-                    mergeGame(loaded);
-                }
+        void getCountries()
+            .then((list) => {
+                if (cancelled) return;
+                setCountries(list);
+                catalogueIsosRef.current = new Set(
+                    list.map((c) => c.countryId.toUpperCase())
+                );
             })
             .catch((err) => {
                 if (!cancelled) {
-                    setError(err instanceof Error ? err.message : "Game not found");
+                    setError(
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to load countries."
+                    );
                 }
             });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
+    // Spectate / resume
+    useEffect(() => {
+        if (!initialGameId) return;
+        let cancelled = false;
+        void getGame(initialGameId)
+            .then((loaded) => {
+                if (!cancelled) mergeGame(loaded);
+            })
+            .catch((err) => {
+                if (!cancelled) {
+                    setError(
+                        err instanceof Error ? err.message : "Game not found"
+                    );
+                }
+            });
         void fetch(
             apiUrl(`/api/games/${encodeURIComponent(initialGameId)}/host-status`),
             { credentials: "include" }
         )
             .then(async (response) => {
-                if (!response.ok) {
-                    return;
-                }
+                if (!response.ok) return;
                 const body = (await response.json()) as { isHost?: boolean };
-                if (!cancelled) {
-                    setIsHost(Boolean(body.isHost));
-                }
+                if (!cancelled) setIsHost(Boolean(body.isHost));
             })
             .catch(() => undefined);
-
         return () => {
             cancelled = true;
         };
     }, [initialGameId]);
 
-    // SignalR when available + poll fallback so NPC turns still appear
+    // SignalR + poll
     useEffect(() => {
-        if (!game?.id) {
-            return;
-        }
-
+        if (!game?.id) return;
         const gameId = game.id;
         setLiveOffline(false);
-
         const connection = connectGameHub(gameId, (next) => {
             setLiveOffline(false);
             mergeGame(next);
         });
-
         connection.onclose(() => setLiveOffline(true));
         connection.onreconnecting(() => setLiveOffline(true));
         connection.onreconnected(() => setLiveOffline(false));
-
         void connection
             .start()
             .then(() => connection.invoke("JoinGame", gameId))
             .then(() => setLiveOffline(false))
             .catch(() => setLiveOffline(true));
-
         const poll = window.setInterval(() => {
-            if (document.hidden) {
-                return;
-            }
+            if (document.hidden) return;
             void getGame(gameId)
-                .then((loaded) => {
-                    if (loaded.status === GameStatus.InProgress || loaded.status === GameStatus.Finished) {
-                        mergeGame(loaded);
-                    }
-                })
+                .then((loaded) => mergeGame(loaded))
                 .catch(() => undefined);
         }, 1500);
-
         return () => {
             window.clearInterval(poll);
             void connection.stop();
         };
     }, [game?.id]);
 
+    // Map bootstrap — once
     useEffect(() => {
-
-        // Prevent state updates if the component unmounts
-        let cancelled = false;
-    
-        async function loadCountries() {
-    
-            try {
-                // Request countries from backend
-                const result = await getCountries();
-    
-                if (!cancelled) {
-                    setCountries(result);
-                }
-            }
-            catch (err) {
-    
-                if (!cancelled) {
-                    setError(
-                        err instanceof Error
-                            ? err.message
-                            : "Failed to load country information."
-                    );
-                }
-            }
-        }
-    
-        void loadCountries();
-    
-        // Cleanup for development Strict Mode and unmounting
-        return () => {
-            cancelled = true;
-        };
-    
-    }, []);
-
-    useEffect(() => {
-
-        // Checks if the HTML container exists
-        // Prevents a second map from being created if it already exists for map.current OR (NOT)mapContainerRef.current
-        if (!mapContainerRef.current || map.current){
-            return;
+        if (!mapContainerRef.current || map.current) return;
+        if (catalogueIsosRef.current.size === 0 && countries.length === 0) {
+            // wait for catalogue so selectable flags are correct
         }
 
-        // Creates a Maplibre/Mapbox map
-        // This creates a new map instance and stores it in the map.current ref
-        map.current = new MapLibreMap({
-
-            // The container the HTML element that will contain the map: mapContainerRef
+        const currentMap = new MapLibreMap({
             container: mapContainerRef.current,
-            // Style will be provided by the geojson file: countries.geojson
             style: {
                 version: 8,
                 sources: {},
@@ -231,137 +195,84 @@ export default function Map({ initialGameId = null }: MapProps) {
                     {
                         id: "background",
                         type: "background",
-                        paint:{
-                            "background-color": "#90D9ED",
-                        },
+                        paint: { "background-color": "#061018" },
                     },
                 ],
             },
-            // Starting position of the "camera" in [longiture, Latituder]
-            center: [0, 20],
-            // Starting zoom level
-            zoom: 1.5,
-            // Minimum zoom level
+            center: [20, 20],
+            zoom: 1.4,
             minZoom: 1,
-            // Maximum zoom level
             maxZoom: 8,
-            // Prevents the map from being rendered in multiple copies horizontally
             renderWorldCopies: false,
+            attributionControl: false,
+        });
+        map.current = currentMap;
+
+        currentMap.on("load", () => {
+            void (async () => {
+                try {
+                    await registerTerrainImages(currentMap);
+                    const isos =
+                        catalogueIsosRef.current.size > 0
+                            ? catalogueIsosRef.current
+                            : new Set(
+                                  countries.map((c) => c.countryId.toUpperCase())
+                              );
+                    const { collection } = await loadCountryGeoJson(isos);
+                    geoRef.current = collection;
+                    addCountryLayers(currentMap, collection);
+
+                    const centers: Record<string, LngLatPair> = {};
+                    for (const feature of collection.features) {
+                        const countryId = String(
+                            feature.properties?.iso3 ?? ""
+                        ).toUpperCase();
+                        if (!/^[A-Z]{3}$/.test(countryId) || centers[countryId]) {
+                            continue;
+                        }
+                        if (
+                            feature.geometry?.type !== "Polygon" &&
+                            feature.geometry?.type !== "MultiPolygon"
+                        ) {
+                            continue;
+                        }
+                        const point = pointOnFeature(feature);
+                        const [longitude, latitude] = point.geometry.coordinates;
+                        if (
+                            Number.isFinite(longitude) &&
+                            Number.isFinite(latitude)
+                        ) {
+                            centers[countryId] = [longitude, latitude];
+                        }
+                    }
+                    countryCentersRef.current = centers;
+                    setCountryCentersReady(true);
+                    setCountriesGeometryReady(true);
+                    setMapReady(true);
+                } catch (err) {
+                    setError(
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to initialise map."
+                    );
+                }
+            })();
         });
 
-        // Store the Map instance on a local variable: currentMap
-        // Used to as a direct reference to the map for the rest of the useEffect
-        const currentMap = map.current;
+        currentMap.on("mouseenter", "countries-interactive", () => {
+            currentMap.getCanvas().style.cursor = "pointer";
+        });
+        currentMap.on("mouseleave", "countries-interactive", () => {
+            currentMap.getCanvas().style.cursor = "";
+        });
 
-        // Adds a listener event: .on
-        // Listens for the load event to finish loading the map
-        currentMap.on("load", () => {
-            
-            // Adds the new geographic data source from the geojson file: countries.geojson
-            currentMap.addSource("countries", {
-                type: "geojson",
-                data: "/countries.geojson",
-                promoteId: "ISO3166-1-Alpha-3",
+        currentMap.on("click", (event) => {
+            if (dragRef.current) return;
+            const features = currentMap.queryRenderedFeatures(event.point, {
+                layers: ["countries-interactive"],
             });
-
-            // Fill layer to render the interior of the countries
-            currentMap.addLayer({
-                id: "countries-fill",
-                type: "fill",
-                source: "countries",
-                // Dynamic painting based on selection
-                paint: {
-                    "fill-color": [
-                        "case",
-                
-                        // If the country is selected, highlight it
-                        [
-                            "boolean",
-                            ["feature-state", "selected"],
-                            false
-                        ],
-                        "#DAE2E3",
-                
-                        // Otherwise, retrieve the owning faction's colour.
-                        // Countries without an owner remain neutral
-                        [
-                            "coalesce",
-                            ["feature-state", "factionColor"],
-                            "#919C9E"
-                        ]
-                    ],
-                
-                    "fill-opacity": 0.85,
-                },
-            });
-
-            // Outline Layer to render the exterior outline of the countries
-            currentMap.addLayer({
-                id: "countries-outline",
-                type: "line",
-                source: "countries",
-                paint: {
-                    //#222222: darkers color
-                    //#FFFFFF: white color
-                    "line-color": "#000000",
-                    "line-width": 1,
-                },
-            });
-
-            const markCountriesReady = () => {
-                if (currentMap.isSourceLoaded("countries")) {
-                    setCountriesGeometryReady(true);
-                }
-            };
-            currentMap.on("sourcedata", (event) => {
-                if (event.sourceId === "countries") {
-                    markCountriesReady();
-                }
-            });
-            markCountriesReady();
-
-            // Listens for hte mouse to hover over a countrys fill layer then changes the pointer
-            currentMap.on("mouseenter", "countries-fill", () => {
-                currentMap.getCanvas().style.cursor = "pointer";
-            });
-
-            // Listens for the mouse to the leav the countrys fill layer to restore it to the deafault
-            currentMap.on("mouseleave", "countries-fill", () => {
-                currentMap.getCanvas().style.cursor = "";
-            });
-
-            // Listens for clicks on the map
-            currentMap.on("click", (event) => {
-
-                // Find any country features at the clicked position.
-                const features = currentMap.queryRenderedFeatures(event.point, {
-                    layers: ["countries-fill"],
-                });
-
-                // Retrieve the first country found, if one exists
-                const country = features[0];
-
-                // If no country was clicked, clear the selection.
-                if (!country || country.id == null) {
-                    if (previousSelectionRef.current !== null) {
-                        currentMap.setFeatureState(
-                            {
-                                source: "countries",
-                                id: previousSelectionRef.current,
-                            },
-                            { selected: false }
-                        );
-                    }
-                    previousSelectionRef.current = null;
-                    setSelectedCountry(null);
-                    return;
-                }
-
-                const countryId = String(country.id);
-                const countryName = String(
-                    country.properties?.name ?? countryId
-                );
-
+            const country = features[0];
+            if (!country || country.id == null) {
                 if (previousSelectionRef.current !== null) {
                     currentMap.setFeatureState(
                         {
@@ -371,317 +282,198 @@ export default function Map({ initialGameId = null }: MapProps) {
                         { selected: false }
                     );
                 }
-
+                previousSelectionRef.current = null;
+                setSelectedCountry(null);
+                return;
+            }
+            const countryId = String(country.id);
+            const countryName = String(
+                country.properties?.name ?? countryId
+            );
+            if (previousSelectionRef.current !== null) {
                 currentMap.setFeatureState(
                     {
                         source: "countries",
-                        id: countryId,
+                        id: previousSelectionRef.current,
                     },
-                    { selected: true }
+                    { selected: false }
                 );
-
-                previousSelectionRef.current = countryId;
-                setSelectedCountry({
-                    id: countryId,
-                    name: countryName,
-                });
-            });
-            setMapReady(true);
-        });
-
-        // Cleanuo function to remove the map when the component unmounts
-        // React in strict mode may try to run additional satup and cleanup cycles to detect lifecycle problems so this clean up function is important to avoid issues
-        return () => {
-            for (const marker of troopMarkersRef.current) {
-                marker.remove();
             }
-            troopMarkersRef.current = [];
-
-            // Removes the map instance
-            map.current?.remove();
-            // Clear the map reference so a new map can be created when nessasary
-            map.current = null;
-            setMapReady(false);
-        };
-    }, []);
-
-    // -------------------------------------------------------------------------
-    // selectCountry — shared so map clicks and faction fly-to dont fight each other
-    // -------------------------------------------------------------------------
-    function selectCountry(countryId: string, countryName?: string) {
-        const currentMap = map.current;
-        if (!currentMap) {
-            return;
-        }
-
-        if (previousSelectionRef.current !== null) {
             currentMap.setFeatureState(
-                {
-                    source: "countries",
-                    id: previousSelectionRef.current,
-                },
-                { selected: false }
+                { source: "countries", id: countryId },
+                { selected: true }
             );
-        }
-
-        currentMap.setFeatureState(
-            {
-                source: "countries",
-                id: countryId,
-            },
-            { selected: true }
-        );
-
-        previousSelectionRef.current = countryId;
-        setSelectedCountry({
-            id: countryId,
-            name: countryName ?? countryId,
+            previousSelectionRef.current = countryId;
+            setSelectedCountry({ id: countryId, name: countryName });
         });
-    }
 
-    function flyToCountry(countryId: string, countryName: string) {
+        return () => {
+            if (driftTimerRef.current) {
+                window.clearTimeout(driftTimerRef.current);
+            }
+            currentMap.remove();
+            map.current = null;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [countries.length > 0]);
+
+    // Camera drift on menu
+    useEffect(() => {
         const currentMap = map.current;
-        const coords = countryCentersRef.current[countryId];
+        if (!currentMap || !mapReady) return;
 
-        selectCountry(countryId, countryName);
-
-        if (!currentMap || !coords) {
-            console.warn(`No map coordinates for ${countryId}`);
-            return;
-        }
-
-        const prefersReducedMotion =
+        const reduced =
             typeof window !== "undefined" &&
             window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-        currentMap.flyTo({
-            center: coords,
-            zoom: Math.max(currentMap.getZoom(), 3.5),
-            duration: prefersReducedMotion ? 0 : 1200,
-        });
-    }
-
-
-    useEffect(() => {
-
-        // Allows the fetch request to be cancelled during cleanup
-        const controller = new AbortController();
-    
-        async function loadCountryCenters() {
-    
-            try {
-    
-                // Retrieve the same GeoJSON file rendered by MapLibre
-                const response = await fetch("/countries.geojson", {
-                    signal: controller.signal
-                });
-    
-                if (!response.ok) {
-                    throw new Error("Unable to load country geometries.");
-                }
-    
-                const geoJson =
-                    await response.json() as FeatureCollection;
-    
-                // Dictionary mapping ISO country IDs to longitude/latitude
-                const centers: Record<string, LngLatPair> = {};
-    
-                // Loop through the geographic features.
-                for (const feature of geoJson.features) {
-    
-                    // Retrieve the same ID used by MapLibre's promoteId
-                    const countryId = String(
-                        feature.properties?.["ISO3166-1-Alpha-3"] ?? ""
-                    ).toUpperCase();
-    
-                    // Skip features without a valid ISO alpha-3 ID
-                    if (!/^[A-Z]{3}$/.test(countryId)) {
-                        continue;
-                    }
-    
-                    // Only polygon geometries represent country areas
-                    if (
-                        feature.geometry?.type !== "Polygon" &&
-                        feature.geometry?.type !== "MultiPolygon"
-                    ) {
-                        continue;
-                    }
-
-                    // first valid feature wins — keep it deterministic
-                    if (centers[countryId]) {
-                        continue;
-                    }
-    
-                    // Calculate a point located on the country's geometry
-                    const point = pointOnFeature(feature);
-    
-                    const [longitude, latitude] = point.geometry.coordinates;
-
-                    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
-                        continue;
-                    }
-    
-                    // Store the geographic location for later use
-                    centers[countryId] = [longitude, latitude];
-                }
-    
-                // Only update state if the request wasn't cancelled
-                if (!controller.signal.aborted) {
-                    countryCentersRef.current = centers;
-                    setCountryCentersReady(true);
-                }
+        if (mode !== "menu" || reduced) {
+            if (driftTimerRef.current) {
+                window.clearTimeout(driftTimerRef.current);
+                driftTimerRef.current = null;
             }
-            catch (err) {
-    
-                // Ignore expected cancellation errors
-                if (controller.signal.aborted) {
-                    return;
-                }
-    
-                setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Unable to load country coordinates."
-                );
-            }
+            currentMap.stop();
+            return;
         }
-    
-        void loadCountryCenters();
-    
-        return () => {
-            controller.abort();
+
+        const targets: LngLatPair[] = [
+            [10, 30],
+            [60, 20],
+            [-40, 15],
+            [100, 25],
+            [-100, 40],
+        ];
+        let i = 0;
+        const tick = () => {
+            const center = targets[i % targets.length];
+            i += 1;
+            currentMap.easeTo({
+                center,
+                zoom: 1.6 + (i % 3) * 0.15,
+                duration: 8000,
+                essential: false,
+            });
+            driftTimerRef.current = window.setTimeout(tick, 8200);
         };
-    
-    }, []);
-
-
-    useEffect(() => {
-
-        // Retrieve the existing MapLibre instance
-        const currentMap = map.current;
-    
-        // Ensure a game exists and MapLibre has finished loading
-        if (!currentMap || !mapReady || !game) {
-            return;
-        }
-    
-        // Ensure the source exists
-        if (!currentMap.getSource("countries")) {
-            return;
-        }
-    
-        // Go through each active game territory
-        for (const territory of game.territories) {
-    
-            // Find the faction that currently owns the territory
-            const owner = game.factions.find(
-                faction => faction.id === territory.ownerFactionId
-            );
-    
-            if (!owner) {
-                continue;
+        tick();
+        return () => {
+            if (driftTimerRef.current) {
+                window.clearTimeout(driftTimerRef.current);
+                driftTimerRef.current = null;
             }
-    
-            // Apply the owner's colour to the corresponding GeoJSON country feature
-            currentMap.setFeatureState(
-                {
-                    source: "countries",
-                    id: territory.countryId,
-                },
-                {
-                    factionColor: owner.color,
-                }
-            );
+            currentMap.stop();
+        };
+    }, [mode, mapReady]);
+
+    // Apply participation + colours when game updates
+    useEffect(() => {
+        const currentMap = map.current;
+        const geo = geoRef.current;
+        if (!currentMap || !mapReady || !geo) return;
+
+        if (!game) {
+            return;
         }
-    
+
+        const participating = new Set(
+            game.territories.map((t) => t.countryId.toUpperCase())
+        );
+        const colors: Record<string, string> = {};
+        for (const territory of game.territories) {
+            const owner = game.factions.find(
+                (f) => f.id === territory.ownerFactionId
+            );
+            if (owner) {
+                colors[territory.countryId.toUpperCase()] = owner.color;
+            }
+        }
+        geoRef.current = setParticipation(
+            currentMap,
+            geo,
+            participating,
+            colors
+        );
     }, [game, mapReady]);
 
-
-    // -------------------------------------------------------------------------
-    // Troop markers — only the ten active territories, not every catalogue country
-    // -------------------------------------------------------------------------
+    // Troop count markers (fallback until Pixi atlas loads)
     useEffect(() => {
         const currentMap = map.current;
-
-        for (const marker of troopMarkersRef.current) {
-            marker.remove();
-        }
+        for (const marker of troopMarkersRef.current) marker.remove();
         troopMarkersRef.current = [];
-
-        if (!currentMap || !mapReady || !game || !countryCentersReady) {
-            return;
-        }
+        if (!currentMap || !mapReady || !game || !countryCentersReady) return;
 
         for (const territory of game.territories) {
             const coords = countryCentersRef.current[territory.countryId];
-            if (!coords) {
-                console.warn(
-                    `Missing coordinates for troop marker: ${territory.countryId}`
-                );
-                continue;
-            }
-
+            if (!coords) continue;
             const owner = game.factions.find(
-                faction => faction.id === territory.ownerFactionId
+                (f) => f.id === territory.ownerFactionId
             );
-            const color = owner?.color ?? "#444444";
-
-            const element = document.createElement("div");
-            element.textContent = String(territory.soldiers);
-            element.title = `${territory.name}: ${territory.soldiers} soldiers`;
-            element.setAttribute(
-                "aria-label",
-                `${territory.name}: ${territory.soldiers} soldiers`
-            );
-            Object.assign(element.style, {
-                minWidth: "28px",
-                height: "28px",
+            const el = document.createElement("div");
+            el.textContent = String(territory.soldiers);
+            Object.assign(el.style, {
+                minWidth: "26px",
+                height: "26px",
                 padding: "0 6px",
-                borderRadius: "999px",
-                backgroundColor: color,
-                color: "#FFFFFF",
-                border: "2px solid #FFFFFF",
-                boxShadow: "0 2px 6px rgba(0,0,0,0.35)",
+                borderRadius: "4px",
+                background: owner?.color ?? "#333",
+                color: "#fff",
+                border: "1px solid #2ee6ff",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: "12px",
+                fontSize: "11px",
                 fontWeight: "700",
                 pointerEvents: "none",
-                userSelect: "none",
+                boxShadow: "0 0 8px rgba(46,230,255,0.35)",
             });
-
-            const marker = new Marker({ element, anchor: "center" })
-                .setLngLat(coords)
-                .addTo(currentMap);
-
-            troopMarkersRef.current.push(marker);
+            troopMarkersRef.current.push(
+                new Marker({ element: el, anchor: "center" })
+                    .setLngLat(coords)
+                    .addTo(currentMap)
+            );
         }
-
         return () => {
-            for (const marker of troopMarkersRef.current) {
-                marker.remove();
-            }
+            for (const marker of troopMarkersRef.current) marker.remove();
             troopMarkersRef.current = [];
         };
     }, [game, mapReady, countryCentersReady]);
 
+    // Presentation speed → NPC API
+    useEffect(() => {
+        if (!game || !isHost) return;
+        const humanTurn =
+            game.factions.find((f) => f.id === game.currentFactionId)?.type ===
+            FactionType.Human;
+        const desired = humanTurn ? 1 : presentationSpeed;
+        if ((game.npcSpeed ?? 1) === desired) return;
+        void setNpcSpeed(game.id, game.version, desired)
+            .then(mergeGame)
+            .catch(() => undefined);
+    }, [presentationSpeed, game?.currentFactionId, game?.id, isHost]);
+
+    function flyToCountry(countryId: string, countryName: string) {
+        const currentMap = map.current;
+        const coords = countryCentersRef.current[countryId];
+        if (!currentMap || !coords) return;
+        setSelectedCountry({ id: countryId, name: countryName });
+        currentMap.flyTo({
+            center: coords,
+            zoom: Math.max(currentMap.getZoom(), 3.5),
+            duration: 1000,
+        });
+    }
+
     async function runGameAction(action: () => Promise<GameState>) {
-        if (!game || actionBusy) {
-            return;
-        }
+        if (!game || actionBusy) return;
         setActionBusy(true);
         setError(null);
         try {
-            const next = await action();
-            mergeGame(next);
+            mergeGame(await action());
         } catch (err) {
             setError(err instanceof Error ? err.message : "Action failed.");
             try {
-                const refreshed = await getGame(game.id);
-                setGame(refreshed);
+                mergeGame(await getGame(game.id));
             } catch {
-                // ignore refresh failure
+                /* ignore */
             }
         } finally {
             setActionBusy(false);
@@ -689,134 +481,267 @@ export default function Map({ initialGameId = null }: MapProps) {
     }
 
     async function handleCreateGame() {
-
-        // Prevent creating a game without a selected country
-        if (!selectedCountry) {
-            return;
-        }
-    
-        // Prevent duplicate game creation requests
-        if (isCreatingGame || game) {
-            return;
-        }
-    
-        // Ensure the selected country exists in the playable catalogue
+        if (!selectedCountry || isCreatingGame || game) return;
         const countryExists = countries.some(
-            country => country.countryId === String(selectedCountry.id)
+            (c) => c.countryId === String(selectedCountry.id)
         );
-    
         if (!countryExists) {
             setError("This country is not available for game creation.");
             return;
         }
-    
         setIsCreatingGame(true);
         setError(null);
-    
         try {
-    
-            // Send the selected country ID to the backend
-            const result = await createGame(String(selectedCountry.id));
-
-            // Store the game returned by the backend
+            const result = await createGame(
+                String(selectedCountry.id),
+                playerName
+            );
             setGame(result.game);
             setIsHost(true);
-
-            // stable shareable URL for spectators
             window.history.pushState({}, "", `/game/${result.game.id}`);
-        }
-        catch (err) {
+        } catch (err) {
             setError(
-                err instanceof Error
-                    ? err.message
-                    : "Unable to create the game."
+                err instanceof Error ? err.message : "Unable to create the game."
             );
-        }
-        finally {
-    
+        } finally {
             setIsCreatingGame(false);
         }
     }
 
-    const selectedCountryData = countries.find(
-        country => country.countryId === String(selectedCountry?.id)
-    );
-    
-    const selectedTerritory = game?.territories.find(
-        territory => territory.countryId === String(selectedCountry?.id)
-    );
-    
-    const selectedOwner = game?.factions.find(
-        faction => faction.id === selectedTerritory?.ownerFactionId
-    );
-    
-    const activeFaction = game?.factions.find(
-        faction => faction.id === game.currentFactionId
-    );
-    //-------------------------------------------------------
-    // Main container for the map and its overlays
-    //-------------------------------------------------------
-    return (
-        
-        <div
-            style = {{
-                width: "100%",
-                height: "100vh",
-                position: "relative",
-            }}
-        >
+    // Territory drag (reinforce / attack)
+    useEffect(() => {
+        const currentMap = map.current;
+        if (!currentMap || !mapReady || !game || !isHost) return;
+        const canvas = currentMap.getCanvas();
 
+        const onDown = (e: MouseEvent) => {
+            if (e.button !== 0) return;
+            const human = game.factions.find((f) => f.type === FactionType.Human);
+            if (!human || game.currentFactionId !== human.id) return;
+            const point = currentMap.project(
+                // approximate from pixel — use map method
+                currentMap.unproject([e.offsetX, e.offsetY])
+            );
+            void point;
+            const features = currentMap.queryRenderedFeatures(
+                [e.offsetX, e.offsetY],
+                { layers: ["countries-interactive"] }
+            );
+            const feat = features[0];
+            if (!feat?.id) return;
+            const iso = String(feat.id);
+            const territory = game.territories.find(
+                (t) => t.countryId === iso && t.ownerFactionId === human.id
+            );
+            if (!territory || territory.soldiers < 2) return;
+            dragRef.current = {
+                sourceId: iso,
+                start: { x: e.offsetX, y: e.offsetY },
+            };
+            currentMap.dragPan.disable();
+            setDragLine({
+                x1: e.offsetX,
+                y1: e.offsetY,
+                x2: e.offsetX,
+                y2: e.offsetY,
+                valid: false,
+            });
+        };
+
+        const onMove = (e: MouseEvent) => {
+            if (!dragRef.current) return;
+            const features = currentMap.queryRenderedFeatures(
+                [e.offsetX, e.offsetY],
+                { layers: ["countries-interactive"] }
+            );
+            const destId = features[0]?.id ? String(features[0].id) : null;
+            const human = game.factions.find((f) => f.type === FactionType.Human);
+            const dest = game.territories.find((t) => t.countryId === destId);
+            let valid = false;
+            if (dest && human && destId !== dragRef.current.sourceId) {
+                if (
+                    dest.ownerFactionId === human.id &&
+                    (game.currentPhase === TurnPhase.ReinforcementOne ||
+                        game.currentPhase === TurnPhase.ReinforcementTwo)
+                ) {
+                    valid = true;
+                }
+                if (
+                    dest.ownerFactionId !== human.id &&
+                    game.currentPhase === TurnPhase.Combat &&
+                    !game.activeCombat
+                ) {
+                    valid = true;
+                }
+            }
+            setDragLine({
+                x1: dragRef.current.start.x,
+                y1: dragRef.current.start.y,
+                x2: e.offsetX,
+                y2: e.offsetY,
+                valid,
+            });
+        };
+
+        const onUp = (e: MouseEvent) => {
+            if (!dragRef.current) return;
+            const sourceId = dragRef.current.sourceId;
+            dragRef.current = null;
+            currentMap.dragPan.enable();
+            setDragLine(null);
+            const features = currentMap.queryRenderedFeatures(
+                [e.offsetX, e.offsetY],
+                { layers: ["countries-interactive"] }
+            );
+            const destId = features[0]?.id ? String(features[0].id) : null;
+            if (!destId || destId === sourceId) return;
+            const human = game.factions.find((f) => f.type === FactionType.Human);
+            const source = game.territories.find((t) => t.countryId === sourceId);
+            const dest = game.territories.find((t) => t.countryId === destId);
+            if (!human || !source || !dest) return;
+
+            if (
+                dest.ownerFactionId === human.id &&
+                (game.currentPhase === TurnPhase.ReinforcementOne ||
+                    game.currentPhase === TurnPhase.ReinforcementTwo)
+            ) {
+                const count = Math.max(1, source.soldiers - 1);
+                void runGameAction(() =>
+                    transferSoldiers(
+                        game.id,
+                        game.version,
+                        source.countryId,
+                        dest.countryId,
+                        count
+                    )
+                );
+                return;
+            }
+
+            if (
+                dest.ownerFactionId !== human.id &&
+                game.currentPhase === TurnPhase.Combat &&
+                !game.activeCombat
+            ) {
+                const commit = Math.max(1, source.soldiers - 1);
+                void runGameAction(() =>
+                    startCombat(
+                        game.id,
+                        game.version,
+                        source.countryId,
+                        dest.countryId,
+                        commit
+                    )
+                );
+            }
+        };
+
+        canvas.addEventListener("mousedown", onDown);
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        return () => {
+            canvas.removeEventListener("mousedown", onDown);
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp);
+            currentMap.dragPan.enable();
+        };
+    }, [game, mapReady, isHost, actionBusy]);
+
+    const selectedCountryData = countries.find(
+        (c) => c.countryId === String(selectedCountry?.id)
+    );
+    const selectedTerritory = game?.territories.find(
+        (t) => t.countryId === String(selectedCountry?.id)
+    );
+    const selectedOwner = game?.factions.find(
+        (f) => f.id === selectedTerritory?.ownerFactionId
+    );
+    const activeFaction = game?.factions.find(
+        (f) => f.id === game.currentFactionId
+    );
+
+    return (
+        <div style={{ width: "100%", height: "100dvh", position: "relative" }}>
             <div
-                /*Connect the div to the map container ref: mapContainerRef*/
-                ref = {mapContainerRef}
-                //Give teh map a visible area*/
-                style = {{
-                    width: "100%",
-                    height: "100vh",
-                }}
+                ref={mapContainerRef}
+                style={{ width: "100%", height: "100dvh" }}
             />
+
             {!countriesGeometryReady && (
                 <div
+                    className="holo-muted"
                     style={{
                         position: "absolute",
                         inset: 0,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        background: "rgba(11, 18, 32, 0.55)",
-                        color: "#F8FAFC",
+                        background: "rgba(2,8,12,0.55)",
                         zIndex: 5,
                         pointerEvents: "none",
-                        fontSize: 18,
-                        letterSpacing: "0.02em",
                     }}
                 >
-                    Loading world map…
+                    Uplinking world mesh…
                 </div>
             )}
+
+            {dragLine && (
+                <svg
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        zIndex: 14,
+                        pointerEvents: "none",
+                    }}
+                >
+                    <defs>
+                        <marker
+                            id="arrow"
+                            markerWidth="8"
+                            markerHeight="8"
+                            refX="6"
+                            refY="3"
+                            orient="auto"
+                        >
+                            <path
+                                d="M0,0 L6,3 L0,6 Z"
+                                fill={dragLine.valid ? "#2ee6ff" : "#ff4d6d"}
+                            />
+                        </marker>
+                    </defs>
+                    <line
+                        x1={dragLine.x1}
+                        y1={dragLine.y1}
+                        x2={dragLine.x2}
+                        y2={dragLine.y2}
+                        stroke={dragLine.valid ? "#2ee6ff" : "#ff4d6d"}
+                        strokeWidth={2}
+                        markerEnd="url(#arrow)"
+                    />
+                </svg>
+            )}
+
             <div
                 style={{
                     position: "absolute",
                     top: 56,
                     left: 12,
                     width: 260,
-                    maxWidth: "calc(100vw - 24px)",
-                    maxHeight: "calc(100vh - 200px)",
                     zIndex: 10,
                     display: "flex",
                     flexDirection: "column",
                     gap: 8,
+                    maxHeight: "calc(100dvh - 200px)",
                     pointerEvents: "none",
                 }}
             >
                 <div style={{ pointerEvents: "auto" }}>
-                    {selectedCountry && (
-                        <HudPanel
+                    {selectedCountry && mode !== "menu" && (
+                        <HoloPanel
                             id="selection"
                             title={selectedCountry.name}
                             side="left"
                             embedded
-                            defaultOpen
                         >
                             <CountryInfoPanel
                                 selectedCountry={selectedCountry}
@@ -827,12 +752,12 @@ export default function Map({ initialGameId = null }: MapProps) {
                                 isCreatingGame={isCreatingGame}
                                 onCreateGame={() => void handleCreateGame()}
                             />
-                        </HudPanel>
+                        </HoloPanel>
                     )}
                 </div>
                 <div style={{ pointerEvents: "auto" }}>
                     {game && (
-                        <HudPanel
+                        <HoloPanel
                             id="log"
                             title="Log"
                             side="left"
@@ -840,25 +765,37 @@ export default function Map({ initialGameId = null }: MapProps) {
                             defaultOpen={false}
                         >
                             <ActionLog gameId={game.id} />
-                        </HudPanel>
+                        </HoloPanel>
+                    )}
+                </div>
+                <div style={{ pointerEvents: "auto" }}>
+                    {game && (
+                        <HoloPanel
+                            id="commentary"
+                            title="Battle AI"
+                            side="left"
+                            embedded
+                            defaultOpen={false}
+                        >
+                            <BattleCommentary gameId={game.id} />
+                        </HoloPanel>
                     )}
                 </div>
             </div>
 
             {game && (
-                <HudPanel
-                    id="factions"
-                    title={`Round ${game.round}`}
-                    side="right"
-                    width={280}
-                    defaultOpen
-                >
+                <HoloPanel id="factions" title={`Round ${game.round}`} side="right">
+                    {playerName && (
+                        <p className="holo-muted" style={{ marginBottom: 8 }}>
+                            Logged in: <strong>{playerName}</strong>
+                        </p>
+                    )}
                     <FactionPanel
                         game={game}
                         activeFaction={activeFaction}
                         onFlyToCountry={flyToCountry}
                     />
-                </HudPanel>
+                </HoloPanel>
             )}
 
             {game && (
@@ -885,9 +822,18 @@ export default function Map({ initialGameId = null }: MapProps) {
                 enabled={Boolean(game)}
                 pulseKey={
                     game?.activeCombat
-                        ? `${game.activeCombat.lastAttackerDice?.join("-")}-${game.activeCombat.lastDefenderDice?.join("-")}-${game.version}`
+                        ? `${game.activeCombat.lastAttackerDice?.join("-")}-${game.version}`
                         : null
                 }
+            />
+
+            <PixiArmyLayer
+                map={map.current}
+                enabled={Boolean(game) && countryCentersReady}
+                centers={countryCentersRef.current}
+                territories={game?.territories ?? []}
+                factions={game?.factions ?? []}
+                combat={game?.activeCombat ?? null}
             />
 
             {game && (
@@ -901,116 +847,119 @@ export default function Map({ initialGameId = null }: MapProps) {
             )}
 
             {game && isHost && (
-                <PhaseControls
+                <TroopPool
                     game={game}
-                    busy={actionBusy}
-                    canAttackSelected={Boolean(
-                        selectedTerritory &&
-                            activeFaction?.type === FactionType.Human &&
-                            selectedTerritory.ownerFactionId !==
-                                activeFaction.id &&
-                            game.territories.some(
+                    presentationSpeed={presentationSpeed}
+                    onSpeedChange={setPresentationSpeed}
+                >
+                    <PhaseControls
+                        game={game}
+                        busy={actionBusy}
+                        canAttackSelected={Boolean(
+                            selectedTerritory &&
+                                activeFaction?.type === FactionType.Human &&
+                                selectedTerritory.ownerFactionId !==
+                                    activeFaction.id &&
+                                game.territories.some(
+                                    (t) =>
+                                        t.ownerFactionId === activeFaction.id &&
+                                        t.soldiers >= 2
+                                )
+                        )}
+                        battleSourceName={
+                            game.territories.find(
                                 (t) =>
-                                    t.ownerFactionId === activeFaction.id &&
+                                    t.countryId ===
+                                    game.activeCombat?.sourceCountryId
+                            )?.name
+                        }
+                        battleDestName={
+                            game.territories.find(
+                                (t) =>
+                                    t.countryId ===
+                                    game.activeCombat?.destinationCountryId
+                            )?.name
+                        }
+                        onAdvance={() =>
+                            void runGameAction(() =>
+                                advancePhase(game.id, game.version)
+                            )
+                        }
+                        onAllocate={() => {
+                            if (!selectedCountry) {
+                                setError(
+                                    "Select one of your countries to place troops."
+                                );
+                                return;
+                            }
+                            void runGameAction(() =>
+                                allocateReinforcements(
+                                    game.id,
+                                    game.version,
+                                    String(selectedCountry.id),
+                                    1
+                                )
+                            );
+                        }}
+                        onSkipCombat={() =>
+                            void runGameAction(() =>
+                                advancePhase(game.id, game.version)
+                            )
+                        }
+                        onRollCombat={() =>
+                            void runGameAction(() =>
+                                rollCombat(game.id, game.version)
+                            )
+                        }
+                        onRetreat={() =>
+                            void runGameAction(() =>
+                                retreatCombat(game.id, game.version)
+                            )
+                        }
+                        onAttackSelected={() => {
+                            const human = game.factions.find(
+                                (f) => f.type === FactionType.Human
+                            );
+                            const source = game.territories.find(
+                                (t) =>
+                                    t.ownerFactionId === human?.id &&
                                     t.soldiers >= 2
-                            )
-                    )}
-                    battleSourceName={
-                        game.territories.find(
-                            (t) =>
-                                t.countryId ===
-                                game.activeCombat?.sourceCountryId
-                        )?.name
-                    }
-                    battleDestName={
-                        game.territories.find(
-                            (t) =>
-                                t.countryId ===
-                                game.activeCombat?.destinationCountryId
-                        )?.name
-                    }
-                    onAdvance={() =>
-                        void runGameAction(() =>
-                            advancePhase(game.id, game.version)
-                        )
-                    }
-                    onAllocate={() => {
-                        if (!selectedCountry) {
-                            setError(
-                                "Select one of your countries to place troops."
                             );
-                            return;
-                        }
-                        void runGameAction(() =>
-                            allocateReinforcements(
-                                game.id,
-                                game.version,
-                                String(selectedCountry.id),
-                                1
-                            )
-                        );
-                    }}
-                    onSkipCombat={() =>
-                        void runGameAction(() =>
-                            advancePhase(game.id, game.version)
-                        )
-                    }
-                    onRollCombat={() =>
-                        void runGameAction(() =>
-                            rollCombat(game.id, game.version)
-                        )
-                    }
-                    onRetreat={() =>
-                        void runGameAction(() =>
-                            retreatCombat(game.id, game.version)
-                        )
-                    }
-                    onAttackSelected={() => {
-                        const human = game.factions.find(
-                            (f) => f.type === FactionType.Human
-                        );
-                        const source = game.territories.find(
-                            (t) =>
-                                t.ownerFactionId === human?.id &&
-                                t.soldiers >= 2
-                        );
-                        const target = selectedTerritory;
-                        if (
-                            !source ||
-                            !human ||
-                            !target ||
-                            target.ownerFactionId === human.id
-                        ) {
-                            setError(
-                                "Select an enemy country and own a land with 2+ soldiers."
+                            const target = selectedTerritory;
+                            if (
+                                !source ||
+                                !human ||
+                                !target ||
+                                target.ownerFactionId === human.id
+                            ) {
+                                setError(
+                                    "Select an enemy country and own a land with 2+ soldiers."
+                                );
+                                return;
+                            }
+                            void runGameAction(() =>
+                                startCombat(
+                                    game.id,
+                                    game.version,
+                                    source.countryId,
+                                    target.countryId,
+                                    Math.max(1, source.soldiers - 1)
+                                )
                             );
-                            return;
-                        }
-                        const commit = Math.max(1, source.soldiers - 1);
-                        void runGameAction(() =>
-                            startCombat(
-                                game.id,
-                                game.version,
-                                source.countryId,
-                                target.countryId,
-                                commit
-                            )
-                        );
-                    }}
-                />
+                        }}
+                    />
+                </TroopPool>
             )}
 
             {game && !isHost && (
                 <div
+                    className="holo-panel"
                     style={{
                         position: "absolute",
                         left: 12,
                         bottom: 12,
                         zIndex: 15,
-                        background: "#111827",
-                        color: "#F9FAFB",
                         padding: "10px 14px",
-                        borderRadius: 8,
                     }}
                 >
                     Spectating — read only
@@ -1020,6 +969,7 @@ export default function Map({ initialGameId = null }: MapProps) {
             {game && isHost && (
                 <button
                     type="button"
+                    className="holo-btn"
                     onClick={() => {
                         void navigator.clipboard.writeText(
                             `${window.location.origin}/game/${game.id}`
@@ -1031,12 +981,6 @@ export default function Map({ initialGameId = null }: MapProps) {
                         left: "50%",
                         transform: "translateX(-50%)",
                         zIndex: 16,
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: "none",
-                        background: "#0F172A",
-                        color: "#fff",
-                        cursor: "pointer",
                     }}
                 >
                     Copy spectator link
@@ -1045,17 +989,14 @@ export default function Map({ initialGameId = null }: MapProps) {
 
             {liveOffline && game && (
                 <div
+                    className="holo-panel"
                     style={{
                         position: "absolute",
                         top: 12,
                         right: 310,
                         zIndex: 16,
-                        background: "#FEF3C7",
-                        color: "#92400E",
                         padding: "6px 10px",
-                        borderRadius: 8,
                         fontSize: 12,
-                        maxWidth: 220,
                     }}
                 >
                     Live feed offline — refreshing…
@@ -1064,24 +1005,38 @@ export default function Map({ initialGameId = null }: MapProps) {
 
             {error && (
                 <div
+                    className="holo-panel"
                     style={{
                         position: "absolute",
                         top: 52,
                         left: "50%",
                         transform: "translateX(-50%)",
+                        zIndex: 20,
                         padding: 12,
                         maxWidth: 360,
-                        backgroundColor: "#FEE2E2",
-                        color: "#991B1B",
-                        borderRadius: 8,
-                        zIndex: 20,
+                        borderColor: "var(--holo-danger)",
+                        color: "#ffc9d4",
                     }}
                 >
                     {error}
                 </div>
             )}
 
+            <div
+                className="holo-muted"
+                style={{
+                    position: "absolute",
+                    right: 8,
+                    bottom: 4,
+                    zIndex: 6,
+                    fontSize: 10,
+                    pointerEvents: "none",
+                }}
+            >
+                Map data © contributors · Campaign Conquest
+            </div>
         </div>
     );
 }
+
 //-----------------------------------------------------------------End of File----------------------------------------------------------------->

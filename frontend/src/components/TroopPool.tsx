@@ -1,0 +1,107 @@
+import { FactionType, TurnPhase, type GameState } from "../types/game";
+
+type Props = {
+    game: GameState;
+    presentationSpeed: 1 | 2;
+    onSpeedChange: (speed: 1 | 2) => void;
+    children?: React.ReactNode;
+};
+
+export default function TroopPool({
+    game,
+    presentationSpeed,
+    onSpeedChange,
+    children,
+}: Props) {
+    const current = game.factions.find((f) => f.id === game.currentFactionId);
+    const isHuman = current?.type === FactionType.Human;
+
+    return (
+        <div
+            style={{
+                position: "absolute",
+                left: "50%",
+                bottom: 12,
+                transform: "translateX(-50%)",
+                zIndex: 16,
+                width: "min(420px, calc(100vw - 24px))",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                pointerEvents: "auto",
+            }}
+        >
+            {children}
+            <div className="holo-panel" style={{ padding: 0 }}>
+                <div className="holo-panel-header">
+                    <span>Troop pool</span>
+                    <span style={{ display: "flex", gap: 6 }}>
+                        <button
+                            type="button"
+                            className="holo-tab"
+                            style={{
+                                padding: "2px 8px",
+                                opacity: presentationSpeed === 1 ? 1 : 0.5,
+                            }}
+                            onClick={() => onSpeedChange(1)}
+                        >
+                            1×
+                        </button>
+                        <button
+                            type="button"
+                            className="holo-tab"
+                            style={{
+                                padding: "2px 8px",
+                                opacity: presentationSpeed === 2 ? 1 : 0.5,
+                            }}
+                            onClick={() => onSpeedChange(2)}
+                            disabled={isHuman}
+                            title={
+                                isHuman
+                                    ? "2× only during NPC turns"
+                                    : "Accelerate NPC presentation"
+                            }
+                        >
+                            2×
+                        </button>
+                    </span>
+                </div>
+                <div
+                    className="holo-panel-body"
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                    }}
+                >
+                    <div>
+                        <div className="holo-muted" style={{ fontSize: 11 }}>
+                            Available to place
+                        </div>
+                        <div style={{ fontSize: 28, fontWeight: 800, color: "var(--holo-accent)" }}>
+                            {game.reinforcementPool}
+                        </div>
+                    </div>
+                    <div className="holo-muted" style={{ textAlign: "right", fontSize: 12 }}>
+                        {isHuman ? "Your turn" : `${current?.name ?? "NPC"} operating`}
+                        <div>
+                            Phase{" "}
+                            {game.currentPhase === TurnPhase.Upkeep
+                                ? "Upkeep"
+                                : game.currentPhase === TurnPhase.ReinforcementOne
+                                  ? "Reinforce"
+                                  : game.currentPhase === TurnPhase.Combat
+                                    ? "Combat"
+                                    : game.currentPhase === TurnPhase.ReinforcementTwo
+                                      ? "Post-combat"
+                                      : "End"}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+//-----------------------------------------------------------------End of File----------------------------------------------------------------->

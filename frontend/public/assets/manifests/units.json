@@ -1,0 +1,332 @@
+{
+  "factions": [
+    {
+      "id": "01",
+      "atlas": "/assets/units/factions/faction_01.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "02",
+      "atlas": "/assets/units/factions/faction_02.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "03",
+      "atlas": "/assets/units/factions/faction_03.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "04",
+      "atlas": "/assets/units/factions/faction_04.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "05",
+      "atlas": "/assets/units/factions/faction_05.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "06",
+      "atlas": "/assets/units/factions/faction_06.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "07",
+      "atlas": "/assets/units/factions/faction_07.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "08",
+      "atlas": "/assets/units/factions/faction_08.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "09",
+      "atlas": "/assets/units/factions/faction_09.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    },
+    {
+      "id": "10",
+      "atlas": "/assets/units/factions/faction_10.png",
+      "frameSize": 64,
+      "facing": "east",
+      "pivot": [
+        32,
+        32
+      ],
+      "muzzleOffset": [
+        54,
+        32
+      ],
+      "animations": {
+        "idle": [
+          "f00"
+        ],
+        "march": [
+          "f01",
+          "f02",
+          "f03",
+          "f04"
+        ],
+        "collapse": [
+          "f05",
+          "f06",
+          "f07",
+          "f08"
+        ]
+      }
+    }
+  ],
+  "effects": {
+    "muzzle": {
+      "atlas": "/assets/effects/muzzle.png",
+      "frames": 3,
+      "frameSize": 64
+    },
+    "plasma": {
+      "atlas": "/assets/effects/plasma.png",
+      "frames": 4,
+      "frameSize": 64
+    },
+    "impact": {
+      "atlas": "/assets/effects/impact.png",
+      "frames": 4,
+      "frameSize": 64
+    }
+  },
+  "notes": "Auto-cropped from Sci-Fi_asset_animation.png; refine crop manifest if jitter appears."
+}

@@ -181,6 +181,26 @@ aws s3 sync .\dist\ s3://YOUR_BUCKET_NAME/ --delete
 aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*"
 ```
 
+### GitHub Actions (recommended)
+
+Workflows in `.github/workflows/`:
+
+- `deploy-frontend.yml` — build Vite app, `s3 sync`, CloudFront invalidate
+- `deploy-api.yml` — `dotnet publish`, SCP to EC2, `systemctl restart campaign-api`
+
+Required repository secrets:
+
+| Secret | Purpose |
+|---|---|
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | S3 + CloudFront |
+| `S3_BUCKET` | Frontend bucket name |
+| `CLOUDFRONT_DISTRIBUTION_ID` | e.g. `E…` / distribution id for `dllta4qw5dvjv` |
+| `EC2_HOST` | API host DNS/IP |
+| `EC2_SSH_KEY` | Private key PEM |
+| `EC2_USER` | Optional, default `ubuntu` |
+
+Keep Mongo / Gemini keys on the server only (systemd env), never in Actions.
+
 ### EC2 env CORS (optional when same CloudFront origin)
 
 In `/etc/campaign-api.env`:

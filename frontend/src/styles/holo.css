@@ -1,0 +1,120 @@
+:root {
+  --holo-bg: rgba(6, 28, 36, 0.78);
+  --holo-bg-strong: rgba(4, 20, 28, 0.92);
+  --holo-border: #2ee6ff;
+  --holo-border-dim: rgba(46, 230, 255, 0.35);
+  --holo-text: #e8fbff;
+  --holo-muted: rgba(200, 240, 255, 0.65);
+  --holo-glow: 0 0 12px rgba(46, 230, 255, 0.45);
+  --holo-accent: #2ee6ff;
+  --holo-danger: #ff4d6d;
+  --holo-font: "Segoe UI", system-ui, sans-serif;
+}
+
+.holo-shell {
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  background: #02080c;
+  font-family: var(--holo-font);
+  color: var(--holo-text);
+}
+
+.holo-panel {
+  background: linear-gradient(160deg, var(--holo-bg-strong), var(--holo-bg));
+  border: 1px solid var(--holo-border-dim);
+  color: var(--holo-text);
+  box-shadow: var(--holo-glow), inset 0 0 24px rgba(46, 230, 255, 0.06);
+  clip-path: polygon(
+    10px 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    10px 100%,
+    0 calc(100% - 10px),
+    0 10px
+  );
+  backdrop-filter: blur(8px);
+}
+
+.holo-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--holo-border-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--holo-accent);
+}
+
+.holo-panel-body {
+  padding: 12px;
+  overflow: auto;
+}
+
+.holo-tab {
+  border: 1px solid var(--holo-border);
+  background: var(--holo-bg-strong);
+  color: var(--holo-accent);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: var(--holo-glow);
+  padding: 8px 10px;
+}
+
+.holo-btn {
+  border: 1px solid var(--holo-border);
+  background: rgba(46, 230, 255, 0.12);
+  color: var(--holo-text);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  cursor: pointer;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+
+.holo-btn:hover:not(:disabled) {
+  background: rgba(46, 230, 255, 0.28);
+  box-shadow: var(--holo-glow);
+}
+
+.holo-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.holo-btn-primary {
+  background: rgba(46, 230, 255, 0.35);
+  color: #041018;
+}
+
+.holo-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--holo-border-dim);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--holo-text);
+  outline: none;
+}
+
+.holo-input:focus {
+  border-color: var(--holo-border);
+  box-shadow: var(--holo-glow);
+}
+
+.holo-muted {
+  color: var(--holo-muted);
+  font-size: 13px;
+}
+
+/*-----------------------------------------------------------------End of File-----------------------------------------------------------------*/

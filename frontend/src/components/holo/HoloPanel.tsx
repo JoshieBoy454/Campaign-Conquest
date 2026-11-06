@@ -1,0 +1,132 @@
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+
+type Side = "left" | "right" | "bottom";
+
+type Props = {
+    id: string;
+    title: string;
+    side: Side;
+    defaultOpen?: boolean;
+    zIndex?: number;
+    width?: number;
+    embedded?: boolean;
+    children: ReactNode;
+};
+
+function readStored(id: string, fallback: boolean): boolean {
+    try {
+        const raw = localStorage.getItem(`cc-hud-${id}`);
+        if (raw === "1") return true;
+        if (raw === "0") return false;
+    } catch {
+        /* ignore */
+    }
+    return fallback;
+}
+
+export default function HoloPanel({
+    id,
+    title,
+    side,
+    defaultOpen = true,
+    zIndex = 10,
+    width = 280,
+    embedded = false,
+    children,
+}: Props) {
+    const [open, setOpen] = useState(() => readStored(id, defaultOpen));
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(`cc-hud-${id}`, open ? "1" : "0");
+        } catch {
+            /* ignore */
+        }
+    }, [id, open]);
+
+    if (!open) {
+        const tabStyle: CSSProperties = embedded
+            ? { alignSelf: "flex-start" }
+            : side === "left"
+              ? {
+                    position: "absolute",
+                    left: 0,
+                    top: id === "log" ? 200 : 72,
+                    zIndex,
+                    writingMode: "vertical-rl",
+                    transform: "rotate(180deg)",
+                }
+              : side === "right"
+                ? {
+                      position: "absolute",
+                      right: 0,
+                      top: 72,
+                      zIndex,
+                      writingMode: "vertical-rl",
+                  }
+                : {
+                      position: "absolute",
+                      left: 20,
+                      bottom: 0,
+                      zIndex,
+                  };
+
+        return (
+            <button
+                type="button"
+                className="holo-tab"
+                style={tabStyle}
+                onClick={() => setOpen(true)}
+                aria-label={`Show ${title}`}
+            >
+                {title}
+            </button>
+        );
+    }
+
+    const shell: CSSProperties = embedded
+        ? { position: "relative", width: "100%", maxHeight: id === "log" ? "28vh" : "42vh", zIndex }
+        : side === "right"
+          ? {
+                position: "absolute",
+                top: 56,
+                right: 12,
+                width,
+                maxHeight: "calc(100dvh - 100px)",
+                zIndex,
+                display: "flex",
+                flexDirection: "column",
+            }
+          : {
+                position: "absolute",
+                top: 56,
+                left: 12,
+                width,
+                maxHeight: "calc(100dvh - 200px)",
+                zIndex,
+                display: "flex",
+                flexDirection: "column",
+            };
+
+    return (
+        <div className="holo-panel" style={shell}>
+            <div className="holo-panel-header">
+                <span>{title}</span>
+                <button
+                    type="button"
+                    className="holo-tab"
+                    style={{ padding: "2px 8px", writingMode: "horizontal-tb", transform: "none" }}
+                    onClick={() => setOpen(false)}
+                    aria-label={`Hide ${title}`}
+                >
+                    −
+                </button>
+            </div>
+            <div className="holo-panel-body" style={{ flex: 1, minHeight: 0 }}>
+                {children}
+            </div>
+        </div>
+    );
+}
+
+//-----------------------------------------------------------------End of File----------------------------------------------------------------->

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -181,20 +182,24 @@ public class NpcTurnHostedService : BackgroundService {
     private readonly IGameRepository _gameRepository;
     private readonly GameConcurrencyGate _concurrencyGate;
     private readonly IGameStateNotifier _gameStateNotifier;
+    private readonly IGameEventRepository _gameEventRepository;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<NpcTurnHostedService> _logger;
-
-    private static readonly TimeSpan BaseDelay = TimeSpan.FromMilliseconds(750);
 
     public NpcTurnHostedService(
         IServiceScopeFactory scopeFactory,
         IGameRepository gameRepository,
         GameConcurrencyGate concurrencyGate,
         IGameStateNotifier gameStateNotifier,
+        IGameEventRepository gameEventRepository,
+        IConfiguration configuration,
         ILogger<NpcTurnHostedService> logger) {
         _scopeFactory = scopeFactory;
         _gameRepository = gameRepository;
         _concurrencyGate = concurrencyGate;
         _gameStateNotifier = gameStateNotifier;
+        _gameEventRepository = gameEventRepository;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -243,8 +248,9 @@ public class NpcTurnHostedService : BackgroundService {
             return;
         }
 
+        int baseDelayMs = _configuration.GetValue("Npc:BaseDelayMs", 800);
         int speed = Math.Clamp(game.NpcSpeed, 1, 8);
-        TimeSpan delay = TimeSpan.FromMilliseconds(BaseDelay.TotalMilliseconds / speed);
+        TimeSpan delay = TimeSpan.FromMilliseconds(Math.Max(100, baseDelayMs) / (double)speed);
 
         using IServiceScope scope = _scopeFactory.CreateScope();
 
@@ -255,6 +261,7 @@ public class NpcTurnHostedService : BackgroundService {
         Guid startingFaction = game.CurrentFactionId ?? npcFactionId;
         TurnPhase startingPhase = game.CurrentPhase;
         long versionAtStart = game.Version;
+        string npcName = game.Factions.FirstOrDefault(f => f.Id == npcFactionId)?.Name ?? "NPC";
 
         policy.PlayTurn(game, npcFactionId, turnService, combatService);
 
@@ -262,6 +269,19 @@ public class NpcTurnHostedService : BackgroundService {
             bool saved = await _gameRepository.TryReplaceAsync(game, versionAtStart, stoppingToken);
 
             if (saved) {
+                await _gameEventRepository.AppendAsync(new GameEvent {
+                    GameId = gameId,
+                    EventId = Guid.NewGuid().ToString("N"),
+                    Type = "NpcTurn",
+                    OccurredAtUtc = DateTime.UtcNow,
+                    PayloadJson = JsonSerializer.Serialize(new {
+                        factionId = npcFactionId,
+                        factionName = npcName,
+                        version = game.Version,
+                        phase = game.CurrentPhase.ToString(),
+                    }),
+                }, stoppingToken);
+
                 await _gameStateNotifier.NotifyGameStateUpdatedAsync(gameId, game, stoppingToken);
             }
         }

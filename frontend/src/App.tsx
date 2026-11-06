@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import "./App.css";
+import "./styles/holo.css";
 import Map from "./components/Map";
-import HomePage from "./pages/HomePage";
+import MainMenuPanel from "./components/MainMenuPanel";
 
 type Route =
     | { name: "home" }
@@ -20,9 +21,17 @@ function parseRoute(): Route {
     return { name: "home" };
 }
 
-// App being the root component — light routing, no react-router dependency yet
+function readStoredName(): string {
+    try {
+        return localStorage.getItem("cc-player-name") ?? "";
+    } catch {
+        return "";
+    }
+}
+
 export default function App() {
     const [route, setRoute] = useState<Route>(() => parseRoute());
+    const [playerName, setPlayerName] = useState(readStoredName);
 
     useEffect(() => {
         const onPop = () => setRoute(parseRoute());
@@ -35,20 +44,38 @@ export default function App() {
         setRoute(parseRoute());
     }
 
-    if (route.name === "home") {
-        return (
-            <HomePage
-                onPlay={() => navigate("/play")}
-                onSpectate={(gameId) => navigate(`/game/${gameId}`)}
-            />
-        );
+    function handleNameChange(name: string) {
+        setPlayerName(name);
+        try {
+            localStorage.setItem("cc-player-name", name.trim());
+        } catch {
+            /* ignore */
+        }
     }
 
-    // play + game both use the map shell for now; Map loads/creates as needed
+    const showMenu = route.name === "home";
+    const mapMode = showMenu ? "menu" : route.name === "play" ? "select" : "play";
+
     return (
-        <div>
-            <Map initialGameId={route.name === "game" ? route.gameId : null} />
+        <div className="holo-shell">
+            <Map
+                mode={mapMode}
+                playerName={playerName.trim()}
+                initialGameId={route.name === "game" ? route.gameId : null}
+            />
+            {showMenu && (
+                <MainMenuPanel
+                    playerName={playerName}
+                    onPlayerNameChange={handleNameChange}
+                    onPlay={() => {
+                        if (!playerName.trim()) return;
+                        navigate("/play");
+                    }}
+                    onSpectate={(gameId) => navigate(`/game/${gameId}`)}
+                />
+            )}
         </div>
     );
 }
+
 //-----------------------------------------------------------------End of File----------------------------------------------------------------->

@@ -9,9 +9,7 @@ type GameEventRow = {
     payloadJson?: string;
 };
 
-type Props = {
-    gameId: string;
-};
+type Props = { gameId: string };
 
 const FRIENDLY: Record<string, string> = {
     AdvancePhase: "Phase advanced",
@@ -20,14 +18,14 @@ const FRIENDLY: Record<string, string> = {
     StartCombat: "Battle started",
     ResolveCombatRound: "Combat round",
     RetreatCombat: "Attacker retreated",
-    SetNpcSpeed: "NPC speed changed",
+    SetNpcSpeed: "Pacing changed",
+    NpcTurn: "NPC completed a turn",
+    CommentaryAvailable: "Battle commentary",
 };
 
-// -------------------------------------------------------------------------
-// ActionLog — short player-facing event lines
-// -------------------------------------------------------------------------
 export default function ActionLog({ gameId }: Props) {
     const [events, setEvents] = useState<GameEventRow[]>([]);
+    const [after, setAfter] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
@@ -36,19 +34,28 @@ export default function ActionLog({ gameId }: Props) {
             try {
                 const response = await fetch(
                     apiUrl(
-                        `/api/games/${encodeURIComponent(gameId)}/events?afterSequence=0`
+                        `/api/games/${encodeURIComponent(gameId)}/events?afterSequence=${after}&limit=100`
                     ),
                     { credentials: "include" }
                 );
-                if (!response.ok) {
-                    return;
-                }
+                if (!response.ok) return;
                 const rows = (await response.json()) as GameEventRow[];
-                if (!cancelled) {
-                    setEvents(rows.slice(-40));
-                }
+                if (cancelled || rows.length === 0) return;
+                const maxSeq = Math.max(
+                    after,
+                    ...rows.map((r) => r.sequence ?? 0)
+                );
+                setAfter(maxSeq);
+                setEvents((prev) => {
+                    const seen = new Set(prev.map((e) => e.eventId));
+                    const merged = [
+                        ...prev,
+                        ...rows.filter((r) => !seen.has(r.eventId)),
+                    ];
+                    return merged.slice(-60);
+                });
             } catch {
-                // ignore — map still works without the log
+                /* ignore */
             }
         }
 
@@ -58,32 +65,31 @@ export default function ActionLog({ gameId }: Props) {
             cancelled = true;
             window.clearInterval(handle);
         };
-    }, [gameId]);
+    }, [gameId, after]);
 
     return (
-        <div>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {events.map((event) => (
-                    <li
-                        key={event.eventId}
-                        style={{
-                            borderBottom: "1px solid #E5E7EB",
-                            padding: "4px 0",
-                        }}
-                    >
-                        <div style={{ fontWeight: 600 }}>
-                            {FRIENDLY[event.type] ?? event.type}
-                        </div>
-                        <div style={{ opacity: 0.65, fontSize: 11 }}>
-                            {new Date(event.occurredAtUtc).toLocaleTimeString()}
-                        </div>
-                    </li>
-                ))}
-                {events.length === 0 && (
-                    <li style={{ opacity: 0.65 }}>No moves yet.</li>
-                )}
-            </ul>
-        </div>
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {events.map((event) => (
+                <li
+                    key={event.eventId}
+                    style={{
+                        borderBottom: "1px solid var(--holo-border-dim)",
+                        padding: "4px 0",
+                    }}
+                >
+                    <div style={{ fontWeight: 600 }}>
+                        {FRIENDLY[event.type] ?? event.type}
+                    </div>
+                    <div className="holo-muted" style={{ fontSize: 11 }}>
+                        {new Date(event.occurredAtUtc).toLocaleTimeString()}
+                    </div>
+                </li>
+            ))}
+            {events.length === 0 && (
+                <li className="holo-muted">No moves yet.</li>
+            )}
+        </ul>
     );
 }
+
 //-----------------------------------------------------------------End of File----------------------------------------------------------------->

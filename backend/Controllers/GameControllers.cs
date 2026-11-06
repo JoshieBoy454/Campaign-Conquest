@@ -10,7 +10,7 @@ namespace Controllers;
     // Record: CreateGameRequest
     // Represetns the info sent by the front end to create a new game
     // -----------------------------------------------------------------------------
-    public record CreateGameRequest(string SelectedCountryId);
+    public record CreateGameRequest(string SelectedCountryId, string? PlayerName = null);
 
     public record VersionedActionRequest(long ExpectedVersion, string? ActionId);
 
@@ -116,7 +116,10 @@ namespace Controllers;
             }
 
             // Create the factions, territories and D20 turn order
-            GameInitializationResult result = _initializationService.CreateGame(request.SelectedCountryId, countries);
+            GameInitializationResult result = _initializationService.CreateGame(
+                request.SelectedCountryId,
+                countries,
+                request.PlayerName);
 
             await _gameRepository.AddAsync(result.Game, cancellationToken);
 
@@ -165,7 +168,7 @@ namespace Controllers;
                 return NotFound("The requested game could not be found");
             }
 
-            int pageSize = Math.Clamp(limit, 1, 200);
+            int pageSize = Math.Clamp(limit, 1, 500);
             IReadOnlyList<GameEvent> events = await _gameEventRepository.GetAfterAsync(
                 gameId,
                 afterSequence,

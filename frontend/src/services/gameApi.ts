@@ -43,7 +43,10 @@ export async function getCountries(): Promise<CountryDefinition[]> {
 // Function: createGame
 // Creates a new game using the country selected by the human player
 // -----------------------------------------------------------------------------
-export async function createGame(selectedCountryId: string): Promise<GameInitializationResult> {
+export async function createGame(
+    selectedCountryId: string,
+    playerName?: string
+): Promise<GameInitializationResult> {
 
     // Send the selected country to thebackend
     const response = await fetch(apiUrl("/api/games"), {
@@ -54,6 +57,7 @@ export async function createGame(selectedCountryId: string): Promise<GameInitial
             },
             body: JSON.stringify({
                 selectedCountryId: selectedCountryId,
+                playerName: playerName?.trim() || undefined,
             }),
         });
 
