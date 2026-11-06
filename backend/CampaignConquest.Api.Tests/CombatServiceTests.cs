@@ -106,6 +106,23 @@ public class CombatServiceTests {
         Assert.Equal(TurnPhase.Combat, game.CurrentPhase);
     }
 
+    [Fact]
+    public void ResolveNextRound_ThreeAttackersRollThreeDice() {
+
+        GameState game = BuildCombatScenario(attackerSoldiers: 3, defenderSoldiers: 2);
+        // Attacker 3 dice then defender 2.
+        CombatService combat = new(
+            new SequencedDiceRoller(6, 5, 4, 3, 2),
+            new TurnService());
+
+        combat.ResolveNextRound(game, game.CurrentFactionId!.Value);
+
+        Assert.NotNull(game.LastResolvedCombat);
+        Assert.Equal(3, game.LastResolvedCombat!.LastAttackerDice.Count);
+        Assert.Equal(2, game.LastResolvedCombat.LastDefenderDice.Count);
+        Assert.Equal(new[] { 6, 5, 4 }, game.LastResolvedCombat.LastAttackerDice);
+    }
+
     private static GameState BuildCombatScenario(int attackerSoldiers, int defenderSoldiers) {
 
         Guid attackerId = Guid.NewGuid();

@@ -5,6 +5,8 @@ type Props = {
     combat?: CombatState | null;
     sourceName?: string;
     destinationName?: string;
+    /** Local human faction — their dice sit on the bottom row. */
+    localFactionId?: string | null;
 };
 
 function diceKey(combat: CombatState): string {
@@ -82,13 +84,12 @@ function DiceRow({
             </span>
             {Array.from({ length: slots }, (_, i) => {
                 const value = values[i];
-                const empty = value == null;
                 return (
                     <DieFace
                         key={`${tone}-${i}`}
                         value={value}
                         tone={tone}
-                        empty={empty}
+                        empty={value == null}
                     />
                 );
             })}
@@ -100,6 +101,7 @@ export default function DiceOverlay({
     combat,
     sourceName,
     destinationName,
+    localFactionId,
 }: Props) {
     const [displayAtk, setDisplayAtk] = useState<number[]>([]);
     const [displayDef, setDisplayDef] = useState<number[]>([]);
@@ -179,13 +181,30 @@ export default function DiceOverlay({
 
     const src = sourceName ?? combat.sourceCountryId;
     const dst = destinationName ?? combat.destinationCountryId;
+    const localIsAttacker =
+        !localFactionId ||
+        combat.attackerFactionId === localFactionId;
+
+    // Bottom row = local player (closer to the HUD); top = opponent.
+    const nearValues = localIsAttacker ? displayAtk : displayDef;
+    const farValues = localIsAttacker ? displayDef : displayAtk;
+    const nearTone = localIsAttacker ? "atk" : "def";
+    const farTone = localIsAttacker ? "def" : "atk";
+    const nearSlots = localIsAttacker ? ATTACKER_SLOTS : DEFENDER_SLOTS;
+    const farSlots = localIsAttacker ? DEFENDER_SLOTS : ATTACKER_SLOTS;
+    const yourLosses = localIsAttacker
+        ? combat.lastAttackerLosses
+        : combat.lastDefenderLosses;
+    const enemyLosses = localIsAttacker
+        ? combat.lastDefenderLosses
+        : combat.lastAttackerLosses;
 
     return (
         <div className="holo-panel" style={{ padding: 0, pointerEvents: "none" }}>
             <div className="holo-panel-header">Combat</div>
             <div
                 className="holo-panel-body"
-                style={{ textAlign: "center", display: "grid", gap: 10 }}
+                style={{ textAlign: "center", display: "grid", gap: 8 }}
             >
                 <div style={{ fontWeight: 700, fontSize: 14 }}>
                     {src} → {dst}
@@ -231,21 +250,26 @@ export default function DiceOverlay({
                     </div>
                 </div>
 
-                {/* Enemy farther away; your (attacker) dice closer to the bottom HUD. */}
-                <div className={rolling ? "holo-dice-row-rolling" : undefined}>
+                <div
+                    className={rolling ? "holo-dice-row-rolling" : undefined}
+                    style={{ marginTop: 4 }}
+                >
                     <DiceRow
                         label="Enemy"
-                        values={displayDef}
-                        tone="def"
-                        slots={DEFENDER_SLOTS}
+                        values={farValues}
+                        tone={farTone}
+                        slots={farSlots}
                     />
                 </div>
-                <div className={rolling ? "holo-dice-row-rolling" : undefined}>
+                <div
+                    className={rolling ? "holo-dice-row-rolling" : undefined}
+                    style={{ marginTop: 10, marginBottom: 2 }}
+                >
                     <DiceRow
                         label="You"
-                        values={displayAtk}
-                        tone="atk"
-                        slots={ATTACKER_SLOTS}
+                        values={nearValues}
+                        tone={nearTone}
+                        slots={nearSlots}
                     />
                 </div>
 
@@ -259,8 +283,7 @@ export default function DiceOverlay({
                             hasDice && !rolling ? "visible" : "hidden",
                     }}
                 >
-                    Losses −{combat.lastAttackerLosses} / −
-                    {combat.lastDefenderLosses}
+                    Losses −{yourLosses} / −{enemyLosses}
                 </div>
             </div>
         </div>

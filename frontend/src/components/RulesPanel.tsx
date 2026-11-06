@@ -68,8 +68,9 @@ export default function RulesPanel({ onClose }: Props) {
                         <p>
                             <strong>Combat</strong> — Left-click your attacking country (2+
                             soldiers), then right-click an enemy. Confirm the commit (one stays
-                            home). Attackers roll up to 3 dice, defenders up to 2. Roll rounds
-                            or retreat; losses come from the server dice.
+                            home). Commit 3+ attackers to roll 3 dice (2→2 dice, 1→1); defenders
+                            roll up to 2. Your dice sit on the bottom row. Roll rounds or
+                            retreat; losses come from the server dice.
                         </p>
                         <p>
                             <strong>Spectator</strong> — Open a game via the spectator link or

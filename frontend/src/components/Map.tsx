@@ -307,6 +307,30 @@ export default function Map({
             currentMap.getCanvas().style.cursor = "";
         });
 
+        // fill-pattern layers lag behind the camera — hide them while panning/zooming.
+        const patternIds = [
+            "terrain-grassy",
+            "terrain-desert",
+            "terrain-icy",
+            "terrain-city",
+        ];
+        const setPatternsVisible = (visible: boolean) => {
+            for (const id of patternIds) {
+                if (!currentMap.getLayer(id)) continue;
+                currentMap.setPaintProperty(
+                    id,
+                    "fill-opacity",
+                    visible ? 0.92 : 0
+                );
+            }
+        };
+        const onMoveStart = () => setPatternsVisible(false);
+        const onMoveEnd = () => setPatternsVisible(true);
+        currentMap.on("movestart", onMoveStart);
+        currentMap.on("zoomstart", onMoveStart);
+        currentMap.on("moveend", onMoveEnd);
+        currentMap.on("zoomend", onMoveEnd);
+
         currentMap.on("click", (event) => {
             const features = currentMap.queryRenderedFeatures(event.point, {
                 layers: ["countries-interactive"],
@@ -353,6 +377,10 @@ export default function Map({
             if (driftTimerRef.current) {
                 window.clearTimeout(driftTimerRef.current);
             }
+            currentMap.off("movestart", onMoveStart);
+            currentMap.off("zoomstart", onMoveStart);
+            currentMap.off("moveend", onMoveEnd);
+            currentMap.off("zoomend", onMoveEnd);
             currentMap.remove();
             map.current = null;
         };
@@ -852,9 +880,27 @@ export default function Map({
     return (
         <div style={{ width: "100%", height: "100dvh", position: "relative" }}>
             <div
-                ref={mapContainerRef}
-                style={{ width: "100%", height: "100dvh" }}
-            />
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                }}
+            >
+                <div
+                    ref={mapContainerRef}
+                    style={{ position: "absolute", inset: 0 }}
+                />
+                <PixiArmyLayer
+                    map={map.current}
+                    enabled={Boolean(game) && countryCentersReady}
+                    centers={countryCentersRef.current}
+                    territories={game?.territories ?? []}
+                    factions={game?.factions ?? []}
+                    combat={game?.activeCombat ?? null}
+                    presentationSpeed={presentationSpeed}
+                />
+            </div>
 
             {!countriesGeometryReady && (
                 <div
@@ -951,16 +997,6 @@ export default function Map({
                 }
             />
 
-            <PixiArmyLayer
-                map={map.current}
-                enabled={Boolean(game) && countryCentersReady}
-                centers={countryCentersRef.current}
-                territories={game?.territories ?? []}
-                factions={game?.factions ?? []}
-                combat={game?.activeCombat ?? null}
-                presentationSpeed={presentationSpeed}
-            />
-
             {game && (
                 <GameEndOverlay
                     game={game}
@@ -977,23 +1013,6 @@ export default function Map({
                     presentationSpeed={presentationSpeed}
                     onSpeedChange={setPresentationSpeed}
                 >
-                    <DiceOverlay
-                        combat={displayCombat}
-                        sourceName={
-                            game.territories.find(
-                                (t) =>
-                                    t.countryId ===
-                                    displayCombat?.sourceCountryId
-                            )?.name
-                        }
-                        destinationName={
-                            game.territories.find(
-                                (t) =>
-                                    t.countryId ===
-                                    displayCombat?.destinationCountryId
-                            )?.name
-                        }
-                    />
                     <PhaseControls
                         game={game}
                         busy={actionBusy}
@@ -1085,6 +1104,24 @@ export default function Map({
                             )
                         }
                     />
+                    <DiceOverlay
+                        combat={displayCombat}
+                        localFactionId={humanFaction?.id}
+                        sourceName={
+                            game.territories.find(
+                                (t) =>
+                                    t.countryId ===
+                                    displayCombat?.sourceCountryId
+                            )?.name
+                        }
+                        destinationName={
+                            game.territories.find(
+                                (t) =>
+                                    t.countryId ===
+                                    displayCombat?.destinationCountryId
+                            )?.name
+                        }
+                    />
                 </TroopPool>
             )}
 
@@ -1102,8 +1139,15 @@ export default function Map({
                         gap: 8,
                     }}
                 >
+                    <div
+                        className="holo-panel"
+                        style={{ padding: "10px 16px", textAlign: "center" }}
+                    >
+                        Spectating — live, read only
+                    </div>
                     <DiceOverlay
                         combat={displayCombat}
+                        localFactionId={humanFaction?.id}
                         sourceName={
                             game.territories.find(
                                 (t) =>
@@ -1119,12 +1163,6 @@ export default function Map({
                             )?.name
                         }
                     />
-                    <div
-                        className="holo-panel"
-                        style={{ padding: "10px 16px", textAlign: "center" }}
-                    >
-                        Spectating — live, read only
-                    </div>
                 </div>
             )}
 

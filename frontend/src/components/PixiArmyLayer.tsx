@@ -82,6 +82,14 @@ const SCALE_IDLE = 1.15;
 const SCALE_COMBAT = 1.3;
 const SCALE_FX = 1.2;
 
+type GeoMark = {
+    lngLat: [number, number];
+    offsetX: number;
+    offsetY: number;
+    faceToward?: [number, number];
+    yLift?: number;
+};
+
 export default function PixiArmyLayer({
     map,
     enabled,
@@ -98,7 +106,17 @@ export default function PixiArmyLayer({
     const animTexturesRef = useRef<Map<string, Texture[]>>(new Map());
     const readyRef = useRef(false);
     const lastCombatKey = useRef<string | null>(null);
-    const tickRef = useRef(0);
+    const centersRef = useRef(centers);
+    const territoriesRef = useRef(territories);
+    const factionsRef = useRef(factions);
+    const combatRef = useRef(combat);
+    const redrawRef = useRef<() => void>(() => undefined);
+    const repositionRef = useRef<() => void>(() => undefined);
+
+    centersRef.current = centers;
+    territoriesRef.current = territories;
+    factionsRef.current = factions;
+    combatRef.current = combat;
 
     useEffect(() => {
         if (!enabled || !hostRef.current) return;
@@ -111,6 +129,7 @@ export default function PixiArmyLayer({
                 resizeTo: host,
                 backgroundAlpha: 0,
                 antialias: true,
+                autoStart: true,
             });
             if (destroyed) {
                 app.destroy(true);
@@ -118,6 +137,8 @@ export default function PixiArmyLayer({
             }
             host.appendChild(app.canvas);
             app.canvas.style.pointerEvents = "none";
+            app.canvas.style.position = "absolute";
+            app.canvas.style.inset = "0";
             const layer = new Container();
             const fx = new Container();
             app.stage.addChild(layer);
@@ -140,8 +161,10 @@ export default function PixiArmyLayer({
                     }
                 }
                 readyRef.current = true;
+                redrawRef.current();
             } catch {
                 readyRef.current = false;
+                redrawRef.current();
             }
         })();
 
@@ -186,28 +209,21 @@ export default function PixiArmyLayer({
         }
     }, [combat, presentationSpeed]);
 
+    // Camera sync + draw — listeners stay mounted; data reads from refs.
     useEffect(() => {
         if (!map || !enabled) return;
 
         const ownerColor = (ownerId: string | undefined) =>
             tintFromHex(
-                factions.find((f) => f.id === ownerId)?.color ?? "#888888"
+                factionsRef.current.find((f) => f.id === ownerId)?.color ??
+                    "#888888"
             );
 
         const clearContainer = (container: Container | null) => {
             if (!container) return;
-            // Destroy (not just remove) so AnimatedSprite tickers don't leak orphans.
             while (container.children.length > 0) {
                 container.children[0].destroy({ children: true });
             }
-        };
-
-        type GeoMark = {
-            lngLat: [number, number];
-            offsetX: number;
-            offsetY: number;
-            faceToward?: [number, number];
-            yLift?: number;
         };
 
         const tagGeo = (
@@ -268,7 +284,6 @@ export default function PixiArmyLayer({
                     );
                 }
 
-                // Idle stays still — only combat/fx clips animate.
                 if (anim === "idle") {
                     const sprite = new Sprite(textures[0]);
                     sprite.anchor.set(0.5, 0.55);
@@ -341,20 +356,23 @@ export default function PixiArmyLayer({
             const layer = layerRef.current;
             if (!layer) return;
             clearContainer(layer);
-            tickRef.current += 1;
 
-            for (const territory of territories) {
-                const ll = centers[territory.countryId];
+            const centersNow = centersRef.current;
+            const territoriesNow = territoriesRef.current;
+            const factionsNow = factionsRef.current;
+            const combatNow = combatRef.current;
+
+            for (const territory of territoriesNow) {
+                const ll = centersNow[territory.countryId];
                 if (!ll) continue;
 
                 const isCombatDest =
-                    combat &&
-                    territory.countryId === combat.destinationCountryId;
+                    combatNow &&
+                    territory.countryId === combatNow.destinationCountryId;
                 const displayCount = isCombatDest
-                    ? combat.defenderSoldiers
+                    ? combatNow.defenderSoldiers
                     : territory.soldiers;
 
-                // Idle soldiers share one facing; combatants aim via faceToward only.
                 if (!isCombatDest) {
                     makeSoldier(
                         layer,
@@ -367,7 +385,7 @@ export default function PixiArmyLayer({
                     );
                 }
 
-                const owner = factions.find(
+                const owner = factionsNow.find(
                     (f) => f.id === territory.ownerFactionId
                 );
                 placeBadge(
@@ -375,25 +393,26 @@ export default function PixiArmyLayer({
                     ll,
                     displayCount,
                     owner?.color ?? "#333333",
-                    combat ? 52 : 64
+                    combatNow ? 52 : 64
                 );
             }
 
-            if (combat) {
-                const srcLl = centers[combat.sourceCountryId];
-                const dstLl = centers[combat.destinationCountryId];
+            if (combatNow) {
+                const srcLl = centersNow[combatNow.sourceCountryId];
+                const dstLl = centersNow[combatNow.destinationCountryId];
                 if (srcLl && dstLl) {
                     const mid: [number, number] = [
                         srcLl[0] * 0.55 + dstLl[0] * 0.45,
                         srcLl[1] * 0.55 + dstLl[1] * 0.45,
                     ];
                     const atkColor =
-                        factions.find((f) => f.id === combat.attackerFactionId)
-                            ?.color ?? "#2ee6ff";
+                        factionsNow.find(
+                            (f) => f.id === combatNow.attackerFactionId
+                        )?.color ?? "#2ee6ff";
                     makeSoldier(
                         layer,
                         mid,
-                        combat.attackerFactionId,
+                        combatNow.attackerFactionId,
                         { x: -22, y: -6 },
                         "shoot",
                         dstLl,
@@ -402,13 +421,19 @@ export default function PixiArmyLayer({
                     makeSoldier(
                         layer,
                         mid,
-                        combat.attackerFactionId,
+                        combatNow.attackerFactionId,
                         { x: 22, y: 10 },
                         "shoot",
                         dstLl,
                         { loop: true, speed: 0.28, scale: SCALE_COMBAT }
                     );
-                    placeBadge(layer, mid, combat.attackerSoldiers, atkColor, 72);
+                    placeBadge(
+                        layer,
+                        mid,
+                        combatNow.attackerSoldiers,
+                        atkColor,
+                        72
+                    );
 
                     const defMid: [number, number] = [
                         srcLl[0] * 0.35 + dstLl[0] * 0.65,
@@ -417,7 +442,7 @@ export default function PixiArmyLayer({
                     makeSoldier(
                         layer,
                         defMid,
-                        combat.defenderFactionId,
+                        combatNow.defenderFactionId,
                         { x: 0, y: 0 },
                         "shoot",
                         srcLl,
@@ -425,16 +450,23 @@ export default function PixiArmyLayer({
                     );
                 }
             }
+
+            // Paint immediately so a redraw during pan does not lag a frame.
+            const app = appRef.current;
+            if (app) {
+                app.renderer.render(app.stage);
+            }
         };
 
         const playSkirmish = (item: PresentationItem) => {
             const fx = fxRef.current;
             if (!fx || !map) return;
+            const centersNow = centersRef.current;
             const srcLl = item.sourceCountryId
-                ? centers[item.sourceCountryId]
+                ? centersNow[item.sourceCountryId]
                 : null;
             const dstLl = item.destinationCountryId
-                ? centers[item.destinationCountryId]
+                ? centersNow[item.destinationCountryId]
                 : null;
             if (!srcLl || !dstLl) return;
 
@@ -449,7 +481,6 @@ export default function PixiArmyLayer({
                 srcLl[1] * 0.35 + dstLl[1] * 0.65,
             ];
 
-            // Only casualty hit clips in the FX layer — no looping run ghosts.
             if (item.kind === "casualty") {
                 if ((item.defenderLosses ?? 0) > 0) {
                     makeSoldier(
@@ -481,6 +512,13 @@ export default function PixiArmyLayer({
             beam.moveTo(a.x, a.y);
             beam.lineTo(b.x, b.y);
             beam.stroke({ width: 2, color: 0x2ee6ff, alpha: 0.4 });
+            tagGeo(beam, {
+                lngLat: midA,
+                offsetX: 0,
+                offsetY: 0,
+            });
+            // Beam endpoints are screen-space; drop on camera move instead.
+            (beam as { __ephemeral?: boolean }).__ephemeral = true;
             fx.addChild(beam);
         };
 
@@ -495,42 +533,64 @@ export default function PixiArmyLayer({
             }
         };
 
+        /** Reproject before the browser composites — `move` fires with the new transform. */
         const repositionLayer = () => {
             const layer = layerRef.current;
-            if (!layer) return;
-            for (const child of layer.children) {
-                projectMarked(
-                    child as { x: number; y: number; rotation: number }
-                );
+            const fx = fxRef.current;
+            if (layer) {
+                for (const child of layer.children) {
+                    projectMarked(
+                        child as { x: number; y: number; rotation: number }
+                    );
+                }
             }
-            // FX is ephemeral screen clutter — drop it while the camera moves.
-            clearContainer(fxRef.current);
+            // FX beams are screen-space; drop them while the camera moves.
+            clearContainer(fx);
+            const app = appRef.current;
+            if (app) {
+                app.renderer.render(app.stage);
+            }
         };
 
-        // Wait briefly for textures if still loading, then draw.
+        redrawRef.current = redrawLod;
+        repositionRef.current = repositionLayer;
+
         let cancelled = false;
         const tryDraw = () => {
             if (cancelled) return;
-            if (!readyRef.current && animTexturesRef.current.size === 0) {
-                window.setTimeout(tryDraw, 80);
+            if (!layerRef.current) {
+                window.setTimeout(tryDraw, 40);
                 return;
             }
             redrawLod();
         };
         tryDraw();
 
+        const onResize = () => {
+            redrawLod();
+        };
+
         const unsub = presentationQueue.subscribe(onPresentation);
-        // Reproject existing markers each frame so they stay glued to the map.
-        map.on("render", repositionLayer);
-        map.on("resize", redrawLod);
+        // `move` updates with the camera; forced Pixi render avoids one-frame drag.
+        map.on("move", repositionLayer);
+        map.on("zoom", repositionLayer);
+        map.on("resize", onResize);
+
         return () => {
             cancelled = true;
             unsub();
-            map.off("render", repositionLayer);
-            map.off("resize", redrawLod);
+            map.off("move", repositionLayer);
+            map.off("zoom", repositionLayer);
+            map.off("resize", onResize);
             clearContainer(layerRef.current);
             clearContainer(fxRef.current);
         };
+    }, [map, enabled]);
+
+    // Data changed — rebuild markers without tearing down camera listeners.
+    useEffect(() => {
+        if (!map || !enabled) return;
+        redrawRef.current();
     }, [map, enabled, centers, territories, factions, combat]);
 
     if (!enabled) return null;
