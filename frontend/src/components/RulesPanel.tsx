@@ -68,8 +68,8 @@ export default function RulesPanel({ onClose }: Props) {
                         <p>
                             <strong>Combat</strong> — Left-click your attacking country (2+
                             soldiers), then right-click an enemy. Confirm the commit (one stays
-                            home).                             Commit 3+ attackers to roll 3 dice (2→2 dice, 1→1); defenders
-                            roll up to 2. Your dice sit on the bottom row. When an NPC
+                            home).                             Commit 3+ attackers to roll 3 dice (2→2 dice, 1→1). When
+                            defending you roll up to 2 dice (bottom row). When an NPC
                             attacks you, the combat panel opens and you roll defense.
                             Roll rounds or retreat; losses come from the server dice.
                         </p>

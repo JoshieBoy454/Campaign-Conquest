@@ -2,7 +2,6 @@ import type { Map as MapLibreMap, GeoJSONSource } from "maplibre-gl";
 import type { FeatureCollection } from "geojson";
 import {
     COUNTRIES_GEOJSON_URL,
-    PATTERN_MIN_ZOOM,
     TERRAIN_IMAGE_URLS,
     TERRAIN_PATTERN_LAYER_IDS,
     defaultTerrainClass,
@@ -145,8 +144,7 @@ export function addCountryLayers(map: MapLibreMap, data: FeatureCollection) {
         });
     }
 
-    // Pattern fills on top of underlays (zoom-gated — cheaper while panning the world).
-    const showPatterns = map.getZoom() >= PATTERN_MIN_ZOOM;
+    // Pattern fills on top of underlays (small tiles — stay visible at every zoom).
     for (const terrain of ["grassy", "desert", "icy", "city"] as TerrainClass[]) {
         map.addLayer({
             id: `terrain-${terrain}`,
@@ -154,7 +152,7 @@ export function addCountryLayers(map: MapLibreMap, data: FeatureCollection) {
             source: "countries",
             filter: ["==", ["get", "terrainClass"], terrain],
             layout: {
-                visibility: showPatterns ? "visible" : "none",
+                visibility: "visible",
             },
             paint: {
                 "fill-pattern": terrain,
@@ -271,13 +269,16 @@ export function setParticipation(
     return next;
 }
 
-/** Toggle fill-pattern layers from zoom — underlays stay on so land never blanks. */
-export function syncTerrainPatternVisibility(map: MapLibreMap): void {
-    const visible = map.getZoom() >= PATTERN_MIN_ZOOM ? "visible" : "none";
+/** Hide patterns only while the camera is moving fast — underlays keep land filled. */
+export function setTerrainPatternsVisible(
+    map: MapLibreMap,
+    visible: boolean
+): void {
+    const value = visible ? "visible" : "none";
     for (const id of TERRAIN_PATTERN_LAYER_IDS) {
         if (!map.getLayer(id)) continue;
-        if (map.getLayoutProperty(id, "visibility") === visible) continue;
-        map.setLayoutProperty(id, "visibility", visible);
+        if (map.getLayoutProperty(id, "visibility") === value) continue;
+        map.setLayoutProperty(id, "visibility", value);
     }
 }
 

@@ -36,7 +36,7 @@ import {
     loadCountryGeoJson,
     registerTerrainImages,
     setParticipation,
-    syncTerrainPatternVisibility,
+    setTerrainPatternsVisible,
 } from "../map/setupCountryLayers";
 import { presentationQueue } from "../services/presentationQueue";
 import type { CountryDefinition, GameState } from "../types/game";
@@ -262,7 +262,7 @@ export default function Map({
 
                     geoRef.current = collection;
                     addCountryLayers(currentMap, collection);
-                    syncTerrainPatternVisibility(currentMap);
+                    setTerrainPatternsVisible(currentMap, true);
                     setCountriesGeometryReady(true);
 
                     // Centers from the same parse (no second GeoJSON fetch).
@@ -309,11 +309,11 @@ export default function Map({
             currentMap.getCanvas().style.cursor = "";
         });
 
-        const onZoomForPatterns = () => {
-            syncTerrainPatternVisibility(currentMap);
-        };
-        currentMap.on("zoom", onZoomForPatterns);
-        currentMap.on("zoomend", onZoomForPatterns);
+        // Hide heavy fill-patterns only while zooming; solids stay. Restore at any zoom.
+        const onZoomStart = () => setTerrainPatternsVisible(currentMap, false);
+        const onZoomEnd = () => setTerrainPatternsVisible(currentMap, true);
+        currentMap.on("zoomstart", onZoomStart);
+        currentMap.on("zoomend", onZoomEnd);
 
         currentMap.on("click", (event) => {
             const features = currentMap.queryRenderedFeatures(event.point, {
@@ -361,8 +361,8 @@ export default function Map({
             if (driftTimerRef.current) {
                 window.clearTimeout(driftTimerRef.current);
             }
-            currentMap.off("zoom", onZoomForPatterns);
-            currentMap.off("zoomend", onZoomForPatterns);
+            currentMap.off("zoomstart", onZoomStart);
+            currentMap.off("zoomend", onZoomEnd);
             currentMap.remove();
             map.current = null;
         };

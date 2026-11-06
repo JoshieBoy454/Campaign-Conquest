@@ -181,11 +181,20 @@ export default function DiceOverlay({
 
     const src = sourceName ?? combat.sourceCountryId;
     const dst = destinationName ?? combat.destinationCountryId;
+    const localId = (localFactionId ?? "").toLowerCase();
+    const atkId = (combat.attackerFactionId ?? "").toLowerCase();
+    const defId = (combat.defenderFactionId ?? "").toLowerCase();
+    // Prefer defender match so under-attack never shows 3 attacker slots as "You".
+    const localIsDefender = Boolean(localId) && localId === defId;
     const localIsAttacker =
-        !localFactionId ||
-        combat.attackerFactionId === localFactionId;
+        Boolean(localId) && localId === atkId
+            ? true
+            : localIsDefender
+              ? false
+              : !localId;
 
     // Bottom row = local player (closer to the HUD); top = opponent.
+    // Defender always max 2 dice; attacker up to 3.
     const nearValues = localIsAttacker ? displayAtk : displayDef;
     const farValues = localIsAttacker ? displayDef : displayAtk;
     const nearTone = localIsAttacker ? "atk" : "def";

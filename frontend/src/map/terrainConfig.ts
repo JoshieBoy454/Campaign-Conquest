@@ -17,17 +17,18 @@ export const DESERT_ISOS = new Set([
     "SYR",
 ]);
 
-export const TERRAIN_IMAGE_URLS: Record<Exclude<TerrainClass, "city"> | "city", string> = {
-    grassy: "/terrain/grassy.png",
-    desert: "/terrain/desert.png",
-    icy: "/terrain/icy.png",
-    city: "/terrain/city.png",
+/** Small tiles for MapLibre fill-pattern — full-size PNGs stall zoom/pan. */
+export const TERRAIN_IMAGE_URLS: Record<
+    Exclude<TerrainClass, "city"> | "city",
+    string
+> = {
+    grassy: "/terrain/grassy-tile.png",
+    desert: "/terrain/desert-tile.png",
+    icy: "/terrain/icy-tile.png",
+    city: "/terrain/city-tile.png",
 };
 
 export const COUNTRIES_GEOJSON_URL = "/countries.simplified.geojson";
-
-/** Fill-pattern terrain only at/above this zoom — solid underlays cover the rest. */
-export const PATTERN_MIN_ZOOM = 2.35;
 
 export const TERRAIN_PATTERN_LAYER_IDS = [
     "terrain-grassy",
