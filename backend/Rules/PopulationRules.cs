@@ -8,7 +8,7 @@ namespace Rules;
 public static class PopulationRules {
 
     // Calc soldier value pased on population
-    public static int CalculateSoldierValue (int population) {
+    public static int CalculateSoldierValue (long population) {
 
         // Checks if population is a valid number, greater than 0 then throws an exception if not
         if(population < 0) {

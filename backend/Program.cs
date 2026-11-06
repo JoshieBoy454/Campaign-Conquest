@@ -14,6 +14,7 @@ builder.Services.AddCors(options =>
     });
 });
 builder.Services.AddScoped<TurnService>();
+builder.Services.AddScoped<GameInitializationService>();
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
