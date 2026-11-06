@@ -15,8 +15,17 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddScoped<TurnService>();
 builder.Services.AddScoped<GameInitializationService>();
+
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+
+// game services
+builder.Services.AddScoped<TurnService>();
+builder.Services.AddScoped<GameInitializationService>();
+
+//shared catalog and temp game storeage
+builder.Services.AddSingleton<CountryCatalogueService>();
+builder.Services.AddSingleton<GameStore>();
 
 var app = builder.Build();
 
