@@ -33,17 +33,20 @@ jobs:
           EC2_USER: ${{ secrets.EC2_USER }}
         run: |
           if [ -z "$SSH_KEY" ] || [ -z "$EC2_HOST" ]; then
-            echo "EC2_SSH_KEY / EC2_HOST secrets missing — skipping remote deploy."
-            exit 0
+            echo "::error::EC2_SSH_KEY / EC2_HOST secrets missing — cannot deploy API."
+            exit 1
           fi
-          USERNAME="${EC2_USER:-ubuntu}"
+          # Amazon Linux 2023 default user is ec2-user (override with EC2_USER secret)
+          USERNAME="${EC2_USER:-ec2-user}"
           install -m 600 /dev/null /tmp/ec2.pem
+          # Preserve PEM newlines from the multiline secret
           printf '%s\n' "$SSH_KEY" > /tmp/ec2.pem
-          scp -o StrictHostKeyChecking=no -i /tmp/ec2.pem api.tgz "$USERNAME@$EC2_HOST:/tmp/campaign-api.tgz"
-          ssh -o StrictHostKeyChecking=no -i /tmp/ec2.pem "$USERNAME@$EC2_HOST" <<'EOF'
-            set -e
+          scp -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem api.tgz "$USERNAME@$EC2_HOST:/tmp/campaign-api.tgz"
+          ssh -o StrictHostKeyChecking=accept-new -i /tmp/ec2.pem "$USERNAME@$EC2_HOST" <<'EOF'
+            set -euo pipefail
             sudo mkdir -p /var/www/campaign-api
             sudo tar -xzf /tmp/campaign-api.tgz -C /var/www/campaign-api
             sudo systemctl restart campaign-api
-            sudo systemctl --no-pager status campaign-api || true
+            sudo systemctl --no-pager --full status campaign-api || true
+            curl -fsS http://127.0.0.1/health || curl -fsS http://127.0.0.1:5212/health || true
           EOF
