@@ -78,24 +78,24 @@ export default function TroopPool({
                     className="holo-panel-body"
                     style={{
                         display: "flex",
+                        flexDirection: "column",
                         alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 12,
+                        justifyContent: "center",
+                        textAlign: "center",
+                        gap: 4,
                     }}
                 >
-                    <div>
-                        <div className="holo-muted" style={{ fontSize: 11 }}>
-                            Available to place
-                        </div>
-                        <div
-                            style={{
-                                fontSize: 28,
-                                fontWeight: 800,
-                                color: "var(--holo-accent)",
-                            }}
-                        >
-                            {game.reinforcementPool}
-                        </div>
+                    <div className="holo-muted" style={{ fontSize: 11 }}>
+                        Available to place
+                    </div>
+                    <div
+                        style={{
+                            fontSize: 28,
+                            fontWeight: 800,
+                            color: "var(--holo-accent)",
+                        }}
+                    >
+                        {game.reinforcementPool}
                     </div>
                 </div>
             </div>

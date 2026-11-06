@@ -907,26 +907,6 @@ export default function Map({
                 </HoloPanel>
             )}
 
-            {game && (
-                <DiceOverlay
-                    combat={game.activeCombat}
-                    sourceName={
-                        game.territories.find(
-                            (t) =>
-                                t.countryId ===
-                                game.activeCombat?.sourceCountryId
-                        )?.name
-                    }
-                    destinationName={
-                        game.territories.find(
-                            (t) =>
-                                t.countryId ===
-                                game.activeCombat?.destinationCountryId
-                        )?.name
-                    }
-                />
-            )}
-
             <PixiEffectsLayer
                 enabled={Boolean(game)}
                 pulseKey={
@@ -962,6 +942,23 @@ export default function Map({
                     presentationSpeed={presentationSpeed}
                     onSpeedChange={setPresentationSpeed}
                 >
+                    <DiceOverlay
+                        combat={game.activeCombat}
+                        sourceName={
+                            game.territories.find(
+                                (t) =>
+                                    t.countryId ===
+                                    game.activeCombat?.sourceCountryId
+                            )?.name
+                        }
+                        destinationName={
+                            game.territories.find(
+                                (t) =>
+                                    t.countryId ===
+                                    game.activeCombat?.destinationCountryId
+                            )?.name
+                        }
+                    />
                     <PhaseControls
                         game={game}
                         busy={actionBusy}
@@ -1058,18 +1055,41 @@ export default function Map({
 
             {game && hostStatusReady && !isHost && (
                 <div
-                    className="holo-panel"
                     style={{
                         position: "absolute",
                         left: "50%",
                         bottom: 12,
                         transform: "translateX(-50%)",
                         zIndex: 15,
-                        padding: "10px 16px",
-                        textAlign: "center",
+                        width: "min(420px, calc(100vw - 24px))",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
                     }}
                 >
-                    Spectating — live, read only
+                    <DiceOverlay
+                        combat={game.activeCombat}
+                        sourceName={
+                            game.territories.find(
+                                (t) =>
+                                    t.countryId ===
+                                    game.activeCombat?.sourceCountryId
+                            )?.name
+                        }
+                        destinationName={
+                            game.territories.find(
+                                (t) =>
+                                    t.countryId ===
+                                    game.activeCombat?.destinationCountryId
+                            )?.name
+                        }
+                    />
+                    <div
+                        className="holo-panel"
+                        style={{ padding: "10px 16px", textAlign: "center" }}
+                    >
+                        Spectating — live, read only
+                    </div>
                 </div>
             )}
 
