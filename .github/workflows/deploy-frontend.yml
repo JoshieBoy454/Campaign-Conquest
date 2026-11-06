@@ -36,11 +36,24 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Sync to S3
+        env:
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
         run: |
-          aws s3 sync dist/ "s3://${{ secrets.S3_BUCKET }}/" --delete
+          BUCKET="$(echo -n "$S3_BUCKET" | tr -d '[:space:]')"
+          BUCKET="${BUCKET#s3://}"
+          BUCKET="${BUCKET%/}"
+          if [ -z "$BUCKET" ]; then
+            echo "::error::S3_BUCKET secret is empty"
+            exit 1
+          fi
+          echo "Syncing to s3://${BUCKET}/"
+          aws s3 sync dist/ "s3://${BUCKET}/" --delete
 
       - name: Invalidate CloudFront
+        env:
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
         run: |
+          DIST_ID="$(echo -n "$CLOUDFRONT_DISTRIBUTION_ID" | tr -d '[:space:]')"
           aws cloudfront create-invalidation \
-            --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --distribution-id "$DIST_ID" \
             --paths "/*"
