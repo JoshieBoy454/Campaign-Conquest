@@ -17,26 +17,38 @@ function diceKey(combat: CombatState): string {
     ].join("-");
 }
 
+const ATTACKER_SLOTS = 3;
+const DEFENDER_SLOTS = 2;
+
 function DieFace({
     value,
     tone,
+    empty,
 }: {
-    value: number;
+    value?: number;
     tone: "atk" | "def";
+    empty?: boolean;
 }) {
     return (
         <span
             className="holo-die"
+            aria-hidden={empty || undefined}
             style={{
-                background:
-                    tone === "atk"
-                        ? "rgba(46, 230, 255, 0.28)"
-                        : "rgba(255, 77, 109, 0.22)",
-                borderColor:
-                    tone === "atk" ? "var(--holo-accent)" : "var(--holo-danger)",
+                background: empty
+                    ? "rgba(255, 255, 255, 0.04)"
+                    : tone === "atk"
+                      ? "rgba(46, 230, 255, 0.28)"
+                      : "rgba(255, 77, 109, 0.22)",
+                borderColor: empty
+                    ? "var(--holo-border-dim)"
+                    : tone === "atk"
+                      ? "var(--holo-accent)"
+                      : "var(--holo-danger)",
+                color: empty ? "transparent" : undefined,
+                opacity: empty ? 0.35 : 1,
             }}
         >
-            {value}
+            {empty ? "0" : value}
         </span>
     );
 }
@@ -45,18 +57,13 @@ function DiceRow({
     label,
     values,
     tone,
+    slots,
 }: {
     label: string;
     values: number[];
     tone: "atk" | "def";
+    slots: number;
 }) {
-    if (values.length === 0) {
-        return (
-            <div className="holo-muted" style={{ fontSize: 12 }}>
-                {label}: awaiting roll
-            </div>
-        );
-    }
     return (
         <div
             style={{
@@ -64,15 +71,25 @@ function DiceRow({
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 8,
-                flexWrap: "wrap",
+                minHeight: 32,
+                flexWrap: "nowrap",
             }}
         >
             <span className="holo-muted" style={{ fontSize: 12, minWidth: 64 }}>
                 {label}
             </span>
-            {values.map((d, i) => (
-                <DieFace key={`${tone}-${i}`} value={d} tone={tone} />
-            ))}
+            {Array.from({ length: slots }, (_, i) => {
+                const value = values[i];
+                const empty = value == null;
+                return (
+                    <DieFace
+                        key={`${tone}-${i}`}
+                        value={value}
+                        tone={tone}
+                        empty={empty}
+                    />
+                );
+            })}
         </div>
     );
 }
@@ -215,18 +232,35 @@ export default function DiceOverlay({
                 </div>
 
                 <div className={rolling ? "holo-dice-row-rolling" : undefined}>
-                    <DiceRow label="Attacker" values={displayAtk} tone="atk" />
+                    <DiceRow
+                        label="Attacker"
+                        values={displayAtk}
+                        tone="atk"
+                        slots={ATTACKER_SLOTS}
+                    />
                 </div>
                 <div className={rolling ? "holo-dice-row-rolling" : undefined}>
-                    <DiceRow label="Defender" values={displayDef} tone="def" />
+                    <DiceRow
+                        label="Defender"
+                        values={displayDef}
+                        tone="def"
+                        slots={DEFENDER_SLOTS}
+                    />
                 </div>
 
-                {hasDice && !rolling && (
-                    <div className="holo-muted" style={{ fontSize: 12 }}>
-                        Losses −{combat.lastAttackerLosses} / −
-                        {combat.lastDefenderLosses}
-                    </div>
-                )}
+                <div
+                    className="holo-muted"
+                    style={{
+                        fontSize: 12,
+                        minHeight: 18,
+                        lineHeight: "18px",
+                        visibility:
+                            hasDice && !rolling ? "visible" : "hidden",
+                    }}
+                >
+                    Losses −{combat.lastAttackerLosses} / −
+                    {combat.lastDefenderLosses}
+                </div>
             </div>
         </div>
     );
