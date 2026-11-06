@@ -29,6 +29,23 @@ export function normalizeEvent(raw: Record<string, unknown>): GameEventRow | nul
     };
 }
 
+async function readErrorMessage(
+    response: Response,
+    fallback: string
+): Promise<string> {
+    try {
+        const body = (await response.json()) as {
+            message?: string;
+            title?: string;
+        };
+        if (body.message) return body.message;
+        if (body.title) return body.title;
+    } catch {
+        /* ignore non-JSON */
+    }
+    return fallback;
+}
+
 export async function fetchEventsAfter(
     gameId: string,
     afterSequence: number,
@@ -42,9 +59,22 @@ export async function fetchEventsAfter(
             { credentials: "include" }
         );
         if (!response.ok) {
-            return { rows: [], error: `Events HTTP ${response.status}` };
+            const detail = await readErrorMessage(
+                response,
+                `Events HTTP ${response.status}`
+            );
+            return {
+                rows: [],
+                error:
+                    detail === `Events HTTP ${response.status}`
+                        ? detail
+                        : `Events HTTP ${response.status}: ${detail}`,
+            };
         }
         const raw = (await response.json()) as Record<string, unknown>[];
+        if (!Array.isArray(raw)) {
+            return { rows: [], error: "Events response was not a list." };
+        }
         const rows = raw
             .map((r) => normalizeEvent(r))
             .filter((r): r is GameEventRow => r != null);

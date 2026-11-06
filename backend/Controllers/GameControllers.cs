@@ -3,6 +3,7 @@ using Models;
 using Repositories;
 using Rules;
 using Services;
+using Microsoft.Extensions.Logging;
 
 namespace Controllers;
 
@@ -50,6 +51,7 @@ namespace Controllers;
         private readonly IGameEventRepository _gameEventRepository;
         private readonly GameActionService _gameActions;
         private readonly HostSessionService _hostSessionService;
+        private readonly ILogger<GamesController> _logger;
 
         // -----------------------------------------------------------------------------
         // Constructor: GamesController
@@ -61,7 +63,8 @@ namespace Controllers;
             IGameRepository gameRepository,
             IGameEventRepository gameEventRepository,
             GameActionService gameActions,
-            HostSessionService hostSessionService) {
+            HostSessionService hostSessionService,
+            ILogger<GamesController> logger) {
 
             _countryCatalogue = countryCatalogue;
             _initializationService = initializationService;
@@ -69,6 +72,7 @@ namespace Controllers;
             _gameEventRepository = gameEventRepository;
             _gameActions = gameActions;
             _hostSessionService = hostSessionService;
+            _logger = logger;
         }
 
         // -----------------------------------------------------------------------------
@@ -164,18 +168,26 @@ namespace Controllers;
             [FromQuery] int limit = 100,
             CancellationToken cancellationToken = default)
         {
-            if (await _gameRepository.GetAsync(gameId, cancellationToken) == null) {
-                return NotFound("The requested game could not be found");
+            try {
+                if (await _gameRepository.GetAsync(gameId, cancellationToken) == null) {
+                    return NotFound(new { message = "The requested game could not be found" });
+                }
+
+                int pageSize = Math.Clamp(limit, 1, 500);
+                IReadOnlyList<GameEvent> events = await _gameEventRepository.GetAfterAsync(
+                    gameId,
+                    afterSequence,
+                    pageSize,
+                    cancellationToken);
+
+                return Ok(events);
             }
-
-            int pageSize = Math.Clamp(limit, 1, 500);
-            IReadOnlyList<GameEvent> events = await _gameEventRepository.GetAfterAsync(
-                gameId,
-                afterSequence,
-                pageSize,
-                cancellationToken);
-
-            return Ok(events);
+            catch (Exception ex) {
+                _logger.LogError(ex, "GET events failed for game {GameId}", gameId);
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new { message = ex.Message });
+            }
         }
 
         [HttpPost("{gameId:guid}/actions/advance-phase")]
