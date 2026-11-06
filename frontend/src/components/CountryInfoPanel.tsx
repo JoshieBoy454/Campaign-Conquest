@@ -10,6 +10,24 @@ type Props = {
     onCreateGame: () => void;
 };
 
+function TroopIcon() {
+    return (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            aria-hidden
+            style={{ flexShrink: 0 }}
+        >
+            <path
+                d="M8 1.5 9.2 5.2 13 5.5 10.2 8.1 11 12 8 10.1 5 12l.8-3.9L3 5.5l3.8-.3L8 1.5Z"
+                fill="currentColor"
+                opacity="0.95"
+            />
+        </svg>
+    );
+}
+
 export default function CountryInfoPanel({
     selectedCountry,
     selectedCountryData,
@@ -23,14 +41,31 @@ export default function CountryInfoPanel({
 
     return (
         <div>
-            <h3 style={{ marginTop: 0, marginBottom: 10, fontSize: 16 }}>
+            <h3 style={{ marginTop: 0, marginBottom: 12, fontSize: 16 }}>
                 {selectedCountry.name}
             </h3>
 
             {!gameExists && selectedCountryData && (
-                <div className="holo-muted" style={{ fontSize: 12, marginBottom: 10 }}>
-                    Pop {selectedCountryData.population.toLocaleString()} ·{" "}
-                    {selectedCountryData.soldierValue} starting armies
+                <div
+                    style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 12,
+                        padding: "6px 10px",
+                        border: "1px solid var(--holo-border-dim)",
+                        color: "var(--holo-accent)",
+                        fontWeight: 700,
+                        fontSize: 14,
+                        letterSpacing: "0.02em",
+                    }}
+                    title="Starting armies"
+                >
+                    <TroopIcon />
+                    <span>{selectedCountryData.soldierValue}</span>
+                    <span className="holo-muted" style={{ fontWeight: 500, fontSize: 12 }}>
+                        starting armies
+                    </span>
                 </div>
             )}
 
@@ -67,16 +102,14 @@ export default function CountryInfoPanel({
                         style={{
                             display: "inline-flex",
                             alignItems: "center",
-                            gap: 4,
+                            gap: 6,
                             fontSize: 13,
                             color: "var(--holo-accent)",
                             fontWeight: 700,
                         }}
                         title="Soldiers"
                     >
-                        <span aria-hidden style={{ opacity: 0.85 }}>
-                            ▣
-                        </span>
+                        <TroopIcon />
                         {selectedTerritory.soldiers}
                     </span>
                 </div>

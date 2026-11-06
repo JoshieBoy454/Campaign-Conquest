@@ -28,6 +28,7 @@ import PixiEffectsLayer from "./PixiEffectsLayer";
 import PixiArmyLayer from "./PixiArmyLayer";
 import GameEndOverlay from "./GameEndOverlay";
 import HoloPanel from "./holo/HoloPanel";
+import { LeftHudDockProvider } from "./holo/LeftHudDock";
 import TroopPool from "./TroopPool";
 import RulesPanel from "./RulesPanel";
 import {
@@ -844,49 +845,38 @@ export default function Map({
                 </div>
             )}
 
-            {selectedCountry && mode !== "menu" && (
-                <HoloPanel
-                    id="selection"
-                    title="Info"
-                    side="left"
-                    defaultOpen
-                    tabTop={64}
-                >
-                    <CountryInfoPanel
-                        selectedCountry={selectedCountry}
-                        selectedCountryData={selectedCountryData}
-                        selectedTerritory={selectedTerritory}
-                        selectedOwner={selectedOwner}
-                        gameExists={!!game}
-                        isCreatingGame={isCreatingGame}
-                        onCreateGame={() => void handleCreateGame()}
-                    />
-                </HoloPanel>
-            )}
+            <LeftHudDockProvider>
+                {selectedCountry && mode !== "menu" && (
+                    <HoloPanel id="selection" title="Info" side="left" defaultOpen>
+                        <CountryInfoPanel
+                            selectedCountry={selectedCountry}
+                            selectedCountryData={selectedCountryData}
+                            selectedTerritory={selectedTerritory}
+                            selectedOwner={selectedOwner}
+                            gameExists={!!game}
+                            isCreatingGame={isCreatingGame}
+                            onCreateGame={() => void handleCreateGame()}
+                        />
+                    </HoloPanel>
+                )}
 
-            {game && (
-                <HoloPanel
-                    id="log"
-                    title="Log"
-                    side="left"
-                    defaultOpen
-                    tabTop={112}
-                >
-                    <ActionLog gameId={game.id} />
-                </HoloPanel>
-            )}
+                {game && (
+                    <HoloPanel id="log" title="Log" side="left" defaultOpen>
+                        <ActionLog gameId={game.id} />
+                    </HoloPanel>
+                )}
 
-            {game && (
-                <HoloPanel
-                    id="commentary"
-                    title="Battle AI"
-                    side="left"
-                    defaultOpen={false}
-                    tabTop={160}
-                >
-                    <BattleCommentary gameId={game.id} />
-                </HoloPanel>
-            )}
+                {game && (
+                    <HoloPanel
+                        id="commentary"
+                        title="Battle AI"
+                        side="left"
+                        defaultOpen={false}
+                    >
+                        <BattleCommentary gameId={game.id} />
+                    </HoloPanel>
+                )}
+            </LeftHudDockProvider>
 
             {rulesOpen && <RulesPanel onClose={() => setRulesOpen(false)} />}
 

@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useLeftHudDock } from "./LeftHudDock";
 
 type Side = "left" | "right" | "bottom";
 
@@ -9,7 +10,7 @@ type Props = {
     defaultOpen?: boolean;
     zIndex?: number;
     width?: number;
-    /** Stacked vertical tab offset from top when collapsed on left/right edges. */
+    /** Ignored when LeftHudDock packs tabs; kept for callers. */
     tabTop?: number;
     children: ReactNode;
 };
@@ -25,15 +26,7 @@ function readStored(id: string, fallback: boolean): boolean {
     return fallback;
 }
 
-/** Collapsed left-edge tabs — tight vertical stack. */
-const LEFT_TAB_TOP: Record<string, number> = {
-    selection: 64,
-    log: 112,
-    commentary: 160,
-    rules: 208,
-};
-
-/** Open left panels — non-overlapping vertical slots. */
+/** Open left panels — non-overlapping vertical slots; inset past tab rail. */
 const LEFT_OPEN_SLOT: Record<string, { top: number | string; maxHeight: string }> =
     {
         selection: { top: 56, maxHeight: "28vh" },
@@ -41,6 +34,7 @@ const LEFT_OPEN_SLOT: Record<string, { top: number | string; maxHeight: string }
         commentary: { top: "calc(56px + 56vh + 16px)", maxHeight: "28vh" },
     };
 
+const LEFT_PANEL_LEFT = 44;
 const EXIT_MS = 260;
 
 function prefersReducedMotion(): boolean {
@@ -60,9 +54,17 @@ export default function HoloPanel({
     tabTop,
     children,
 }: Props) {
+    const dock = useLeftHudDock();
     const [open, setOpen] = useState(() => readStored(id, defaultOpen));
     const [exiting, setExiting] = useState(false);
     const reduced = prefersReducedMotion();
+    const visiblyOpen = open || exiting;
+
+    useEffect(() => {
+        if (side !== "left" || !dock) return;
+        dock.setOpen(id, visiblyOpen);
+        return () => dock.setOpen(id, null);
+    }, [dock, id, side, visiblyOpen]);
 
     useEffect(() => {
         if (exiting) return;
@@ -93,16 +95,16 @@ export default function HoloPanel({
 
     if (!open && !exiting) {
         const top =
-            tabTop ??
-            LEFT_TAB_TOP[id] ??
-            (side === "left" ? 64 : side === "right" ? 72 : undefined);
+            side === "left" && dock
+                ? dock.tabTopFor(id)
+                : (tabTop ?? (side === "left" ? 64 : 72));
         const tabStyle: CSSProperties =
             side === "left"
                 ? {
                       position: "absolute",
                       left: 0,
                       top,
-                      zIndex,
+                      zIndex: zIndex + 5,
                       writingMode: "vertical-rl",
                       transform: "rotate(180deg)",
                   }
@@ -161,7 +163,7 @@ export default function HoloPanel({
               : {
                     position: "absolute",
                     top: leftSlot?.top ?? 56,
-                    left: 12,
+                    left: LEFT_PANEL_LEFT,
                     width,
                     maxHeight: leftSlot?.maxHeight ?? "28vh",
                     zIndex,
