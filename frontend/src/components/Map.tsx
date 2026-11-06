@@ -2,15 +2,28 @@ import { useEffect, useRef, useState } from "react";
 import { Map as MapLibreMap, Marker, setWorkerUrl } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { createGame, getCountries } from "../services/gameApi";
+import {
+    advancePhase,
+    allocateReinforcements,
+    createGame,
+    getCountries,
+    getGame,
+    retreatCombat,
+    rollCombat,
+    startCombat,
+} from "../services/gameApi";
 import { pointOnFeature } from "@turf/point-on-feature";
 import type { FeatureCollection } from "geojson";
+import CountryInfoPanel from "./CountryInfoPanel";
+import FactionPanel from "./FactionPanel";
+import PhaseControls from "./PhaseControls";
 
 import type {
     CountryDefinition,
     GameState,
     TurnOrderRoll
 } from "../types/game";
+import { FactionType, TurnPhase } from "../types/game";
 
 
 setWorkerUrl(workerUrl);
@@ -51,6 +64,7 @@ export default function Map() {
     const [turnOrderRolls, setTurnOrderRolls] = useState<TurnOrderRoll[]>([]);
 
     const [isCreatingGame, setIsCreatingGame] = useState(false);
+    const [actionBusy, setActionBusy] = useState(false);
 
     const [error, setError] = useState<string | null>(null);
 
@@ -538,6 +552,46 @@ export default function Map() {
         };
     }, [game, mapReady, countryCentersReady]);
 
+    // poll while an NPC is up so the map keeps up without signalr yet
+    useEffect(() => {
+        if (!game) {
+            return;
+        }
+        const current = game.factions.find((f) => f.id === game.currentFactionId);
+        if (!current || current.type === FactionType.Human || game.status === 3) {
+            return;
+        }
+
+        const handle = window.setInterval(() => {
+            void getGame(game.id)
+                .then((next) => setGame(next))
+                .catch(() => undefined);
+        }, 800);
+
+        return () => window.clearInterval(handle);
+    }, [game]);
+
+    async function runGameAction(action: () => Promise<GameState>) {
+        if (!game || actionBusy) {
+            return;
+        }
+        setActionBusy(true);
+        setError(null);
+        try {
+            const next = await action();
+            setGame(next);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Action failed.");
+            try {
+                const refreshed = await getGame(game.id);
+                setGame(refreshed);
+            } catch {
+                // ignore refresh failure
+            }
+        } finally {
+            setActionBusy(false);
+        }
+    }
 
     async function handleCreateGame() {
 
@@ -628,183 +682,108 @@ export default function Map() {
                     height: "100vh",
                 }}
             />
-            {
-                // Only shows the panel when a county is selected 
-                selectedCountry && (
-                    <div
-                        style={{
-                            // Keeps the position of the panel above the map
-                            position: "absolute",
-                            top: 20,
-                            left: 20,
-                            width: 260,
-                            maxWidth: "calc(100vw - 40px)",
-                            maxHeight: "75vh",
-                            overflowY: "auto",
-                            padding: 16,
-                            backgroundColor: "#FFFFFF",
-                            color: "#111111",
-                            borderRadius: 8,
-                            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                            zIndex: 10,
-                        }}
-                    >
-                        <h3>Selected Country</h3>
-                        <p>{selectedCountry.name}</p>
-                        <p>{selectedCountry.id}</p>
-
-                        {selectedCountryData && (
-                            <>
-                                <p>
-                                    Population: {selectedCountryData.population.toLocaleString()}
-                                </p>
-
-                                <p>
-                                    Soldier Value: {selectedCountryData.soldierValue}
-                                </p>
-                            </>
-                        )}
-
-                        {game && selectedTerritory && (
-                            <>
-                                <p>Owner: {selectedOwner?.name}</p>
-                                <p>Soldiers: {selectedTerritory.soldiers}</p>
-                            </>
-                        )}
-                        {!game && (
-                            <button
-                                type="button"
-                                onClick={() => void handleCreateGame()}
-                                disabled={!selectedCountryData || isCreatingGame}
-                                style={{
-                                    padding: "10px 14px",
-                                    borderRadius: 6,
-                                    border: "none",
-                                    backgroundColor: "#1160BF",
-                                    color: "#FFFFFF",
-                                    cursor: "pointer",
-                                    opacity: !selectedCountryData || isCreatingGame ? 0.5 : 1,
-                                }}
-                            >
-                                {isCreatingGame
-                                    ? "Creating Game..."
-                                    : selectedCountryData
-                                        ? "Start Game"
-                                        : "Country Unavailable"}
-                            </button>
-                        )}
-                    </div>
-                )
-            }
+            {selectedCountry && (
+                <CountryInfoPanel
+                    selectedCountry={selectedCountry}
+                    selectedCountryData={selectedCountryData}
+                    selectedTerritory={selectedTerritory}
+                    selectedOwner={selectedOwner}
+                    gameExists={!!game}
+                    isCreatingGame={isCreatingGame}
+                    onCreateGame={() => void handleCreateGame()}
+                />
+            )}
             {game && (
+                <FactionPanel
+                    game={game}
+                    turnOrderRollCount={turnOrderRolls.length}
+                    activeFaction={activeFaction}
+                    onFlyToCountry={flyToCountry}
+                />
+            )}
+
+            {game && selectedCountry && selectedTerritory && game.currentPhase === TurnPhase.Combat && !game.activeCombat && activeFaction?.type === FactionType.Human && (
                 <div
                     style={{
                         position: "absolute",
+                        left: 300,
                         top: 20,
-                        right: 20,
-                        padding: 16,
-                        width: 300,
-                        maxWidth: "calc(100vw - 40px)",
-                        maxHeight: "calc(100vh - 40px)",
-                        overflowY: "auto",
-                        boxSizing: "border-box",
-                        backgroundColor: "#FFFFFF",
-                        color: "#111111",
+                        zIndex: 12,
+                        background: "#fff",
+                        padding: 12,
                         borderRadius: 8,
                         boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                        zIndex: 10,
                     }}
                 >
-                    <h3>Campaign Conquest</h3>
-
-                    <p>Round: {game.round}</p>
-
-                    <p>Current Turn: {activeFaction?.name ?? "Unknown"}</p>
-
-                    <p>D20 Rolls Recorded: {turnOrderRolls.length}</p>
-
-                    <hr />
-
-                    <h4>Factions</h4>
-
-                    {[...game.factions]
-                        .sort((a, b) => a.turnPosition - b.turnPosition)
-                        .map(faction => {
-
-                            // Retrieve the countries owned by this faction
-                            const ownedTerritories = game.territories.filter(
-                                territory => territory.ownerFactionId === faction.id
+                    <button
+                        type="button"
+                        disabled={actionBusy || selectedTerritory.soldiers < 1}
+                        onClick={() => {
+                            const human = game.factions.find((f) => f.type === FactionType.Human);
+                            const source = game.territories.find(
+                                (t) => t.ownerFactionId === human?.id && t.soldiers >= 2
                             );
-
-                            // Calculate the faction's total soldiers
-                            const totalSoldiers = ownedTerritories.reduce(
-                                (total, territory) => total + territory.soldiers,
-                                0
+                            const target = selectedTerritory;
+                            if (!source || !human || target.ownerFactionId === human.id) {
+                                setError("Pick an enemy country and own a source with 2+ soldiers.");
+                                return;
+                            }
+                            const commit = Math.max(1, source.soldiers - 1);
+                            void runGameAction(() =>
+                                startCombat(
+                                    game.id,
+                                    game.version,
+                                    source.countryId,
+                                    target.countryId,
+                                    commit
+                                )
                             );
-
-                            return (
-                                <div
-                                    key={faction.id}
-                                    style={{
-                                        marginBottom: 12,
-                                        paddingBottom: 8,
-                                        borderBottom: "1px solid #DDDDDD",
-                                    }}
-                                >
-                                    <div
-                                        style={{
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: 8,
-                                        }}
-                                    >
-                                        <span
-                                            style={{
-                                                width: 12,
-                                                height: 12,
-                                                borderRadius: 3,
-                                                backgroundColor: faction.color,
-                                                flexShrink: 0,
-                                            }}
-                                        />
-
-                                        <strong>
-                                            {faction.turnPosition}. {faction.name}
-                                        </strong>
-                                    </div>
-
-                                    <p>Total Soldiers: {totalSoldiers}</p>
-
-                                    {ownedTerritories.map(territory => (
-                                        <button
-                                            key={territory.countryId}
-                                            type="button"
-                                            onClick={() =>
-                                                flyToCountry(
-                                                    territory.countryId,
-                                                    territory.name
-                                                )
-                                            }
-                                            style={{
-                                                display: "block",
-                                                width: "100%",
-                                                textAlign: "left",
-                                                margin: "4px 0",
-                                                padding: "4px 6px",
-                                                border: "1px solid #DDDDDD",
-                                                borderRadius: 4,
-                                                background: "#F7F7F7",
-                                                color: "#111111",
-                                                cursor: "pointer",
-                                            }}
-                                        >
-                                            {territory.name}: {territory.soldiers}
-                                        </button>
-                                    ))}
-                                </div>
-                            );
-                        })}
+                        }}
+                    >
+                        Attack selected with max force
+                    </button>
                 </div>
+            )}
+
+            {game && (
+                <PhaseControls
+                    game={game}
+                    busy={actionBusy}
+                    onAdvance={() =>
+                        void runGameAction(() =>
+                            advancePhase(game.id, game.version)
+                        )
+                    }
+                    onAllocate={() => {
+                        if (!selectedCountry) {
+                            setError("Select one of your countries to place troops.");
+                            return;
+                        }
+                        void runGameAction(() =>
+                            allocateReinforcements(
+                                game.id,
+                                game.version,
+                                String(selectedCountry.id),
+                                1
+                            )
+                        );
+                    }}
+                    onSkipCombat={() =>
+                        void runGameAction(() =>
+                            advancePhase(game.id, game.version)
+                        )
+                    }
+                    onRollCombat={() =>
+                        void runGameAction(() =>
+                            rollCombat(game.id, game.version)
+                        )
+                    }
+                    onRetreat={() =>
+                        void runGameAction(() =>
+                            retreatCombat(game.id, game.version)
+                        )
+                    }
+                />
             )}
 
             {error && (

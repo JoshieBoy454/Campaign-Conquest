@@ -118,6 +118,12 @@ public class TurnService {
 
             case TurnPhase.Combat:
 
+                if (game.ActiveCombat != null) {
+                    throw new InvalidOperationException(
+                        "Finish or retreat from combat before advancing"
+                    );
+                }
+
                 // The game will turn this phase for you if you skip combat or retreat or end combat
                 EnterReinforcementTwo(game, currentFaction);
                 break;
@@ -308,11 +314,32 @@ public class TurnService {
         }
     }
 
+    // ---- Leave combat phase after skip or successful conquest ----
+    public void FinishCombatPhase(GameState game, Guid factionId) {
+
+        Faction faction = RequireActiveFaction(game, factionId);
+
+        if (game.CurrentPhase != TurnPhase.Combat) {
+            throw new InvalidOperationException(
+                "Combat can only be finished during the combat phase"
+            );
+        }
+
+        if (game.ActiveCombat != null) {
+            throw new InvalidOperationException(
+                "Active combat must be resolved before finishing the phase"
+            );
+        }
+
+        EnterReinforcementTwo(game, faction);
+        game.Version++;
+    }
+
     // -----------------------------------------------------------------------------
     // Method: EnterReinforcementTwo
     // The amount of soldiers a player/faction earns after conquoring a country
     // -----------------------------------------------------------------------------
-    private static void EnterReinforcementTwo(GameState game, Faction faction) {
+    internal static void EnterReinforcementTwo(GameState game, Faction faction) {
 
         //Checks if more than 1 country was conquered this turn if true thows an exception
         if(game.ConqueredThisTurn.Count > 1) {

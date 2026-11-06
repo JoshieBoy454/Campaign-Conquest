@@ -13,19 +13,22 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod();
     });
 });
-builder.Services.AddScoped<TurnService>();
-builder.Services.AddScoped<GameInitializationService>();
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
-// game services
+// ---- core game services ----
 builder.Services.AddScoped<TurnService>();
 builder.Services.AddScoped<GameInitializationService>();
+builder.Services.AddSingleton<IDiceRoller, RandomDiceRoller>();
+builder.Services.AddScoped<CombatService>();
+builder.Services.AddScoped<GameActionService>();
+builder.Services.AddSingleton<INpcDecisionPolicy, SimpleNpcDecisionPolicy>();
 
-//shared catalog and temp game storeage
 builder.Services.AddSingleton<CountryCatalogueService>();
 builder.Services.AddSingleton<GameStore>();
+
+builder.Services.AddHostedService<NpcTurnHostedService>();
 
 var app = builder.Build();
 

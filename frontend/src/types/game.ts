@@ -42,6 +42,19 @@
     // Interface: GameState
     // Represents the current state of a Campaign Conquest game
     // -------------------------------------------------------------------------
+    export interface CombatState {
+        attackerFactionId: string;
+        defenderFactionId: string;
+        sourceCountryId: string;
+        destinationCountryId: string;
+        attackerSoldiers: number;
+        defenderSoldiers: number;
+        lastAttackerDice: number[];
+        lastDefenderDice: number[];
+        lastAttackerLosses: number;
+        lastDefenderLosses: number;
+    }
+
     export interface GameState {
         id: string;
         status: GameStatus;
@@ -58,6 +71,8 @@
         winnerFactionId: string | null;
     
         version: number;
+        activeCombat?: CombatState | null;
+        npcSpeed?: number;
     }
 
     // -------------------------------------------------------------------------

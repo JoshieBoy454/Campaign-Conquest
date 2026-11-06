@@ -42,6 +42,12 @@ public class GameState {
 
     // used for used to prevent database conflict increments with the game state to ensure spectator synchronisation
     public long Version {get; set;}
+
+    // ---- Ongoing combat (null when not fighting) ----
+    public CombatState? ActiveCombat { get; set; }
+
+    // ---- NPC autoplay delay multiplier (1 = normal) ----
+    public int NpcSpeed { get; set; } = 1;
 }
 
 //-----------------------------------------------------------------End of File----------------------------------------------------------------->

@@ -25,4 +25,6 @@ public class GameStore
             ? game
             : null;
     }
+
+    public IEnumerable<GameState> GetAllGames() => _games.Values;
 }

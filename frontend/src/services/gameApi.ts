@@ -7,6 +7,20 @@ import type {
 // Retrieves the API address from the Vite environment configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+function newActionId(): string {
+    return crypto.randomUUID();
+}
+
+async function readGameOrThrow(response: Response, fallback: string): Promise<GameState> {
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+            body || `${fallback} HTTP ${response.status}`
+        );
+    }
+    return await response.json() as GameState;
+}
+
 // -----------------------------------------------------------------------------
 // Function: getCountries
 // Retrieves the available countries from the backend country catalogue
@@ -40,11 +54,10 @@ export async function createGame(selectedCountryId: string): Promise<GameInitial
         `${API_BASE_URL}/api/games`,
         {
             method: "POST",
-
+            credentials: "include",
             headers: {
                 "Content-Type": "application/json",
             },
-
             body: JSON.stringify({
                 selectedCountryId: selectedCountryId,
             }),
@@ -72,7 +85,9 @@ export async function getGame(
 
     // Request an existing game from the backend
     const response = await fetch(
-        `${API_BASE_URL}/api/games/${encodeURIComponent(gameId)}`);
+        `${API_BASE_URL}/api/games/${encodeURIComponent(gameId)}`,
+        { credentials: "include" }
+    );
 
     // Check whether the game was successfully retrieved
     if (!response.ok) {
@@ -82,5 +97,91 @@ export async function getGame(
 
     // Convert the backend response into a GameState
     return await response.json() as GameState;
+}
+
+async function postAction(
+    gameId: string,
+    path: string,
+    body: Record<string, unknown>
+): Promise<GameState> {
+    const response = await fetch(
+        `${API_BASE_URL}/api/games/${encodeURIComponent(gameId)}/${path}`,
+        {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                actionId: newActionId(),
+                ...body,
+            }),
+        }
+    );
+    return readGameOrThrow(response, `Action ${path} failed`);
+}
+
+export function advancePhase(gameId: string, expectedVersion: number) {
+    return postAction(gameId, "actions/advance-phase", { expectedVersion });
+}
+
+export function allocateReinforcements(
+    gameId: string,
+    expectedVersion: number,
+    countryId: string,
+    soldierCount: number
+) {
+    return postAction(gameId, "actions/allocate-reinforcements", {
+        expectedVersion,
+        countryId,
+        soldierCount,
+    });
+}
+
+export function transferSoldiers(
+    gameId: string,
+    expectedVersion: number,
+    sourceCountryId: string,
+    destinationCountryId: string,
+    soldierCount: number
+) {
+    return postAction(gameId, "actions/transfer-soldiers", {
+        expectedVersion,
+        sourceCountryId,
+        destinationCountryId,
+        soldierCount,
+    });
+}
+
+export function startCombat(
+    gameId: string,
+    expectedVersion: number,
+    sourceCountryId: string,
+    destinationCountryId: string,
+    soldierCount: number
+) {
+    return postAction(gameId, "actions/combat/start", {
+        expectedVersion,
+        sourceCountryId,
+        destinationCountryId,
+        soldierCount,
+    });
+}
+
+export function rollCombat(gameId: string, expectedVersion: number) {
+    return postAction(gameId, "actions/combat/roll", { expectedVersion });
+}
+
+export function retreatCombat(gameId: string, expectedVersion: number) {
+    return postAction(gameId, "actions/combat/retreat", { expectedVersion });
+}
+
+export function setNpcSpeed(
+    gameId: string,
+    expectedVersion: number,
+    npcSpeed: number
+) {
+    return postAction(gameId, "settings/npc-speed", {
+        expectedVersion,
+        npcSpeed,
+    });
 }
 //-----------------------------------------------------------------End of File----------------------------------------------------------------->
