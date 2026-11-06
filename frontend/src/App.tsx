@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import "./App.css";
 import "./styles/holo.css";
 import Map from "./components/Map";
 import MainMenuPanel from "./components/MainMenuPanel";

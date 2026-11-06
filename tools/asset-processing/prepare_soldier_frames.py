@@ -10,7 +10,8 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "frontend" / "src" / "assets" / "Soldier"
+# Drop raw Soldier frame folders here (hipFire/, run/, shoot/, hit/) when regenerating.
+SRC = Path(__file__).resolve().parent / "soldier-sources"
 OUT = ROOT / "frontend" / "public" / "assets" / "units" / "soldier"
 MANIFEST = ROOT / "frontend" / "public" / "assets" / "manifests" / "soldier.json"
 

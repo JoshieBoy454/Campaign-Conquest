@@ -3,7 +3,6 @@ import type { FeatureCollection } from "geojson";
 import {
     COUNTRIES_GEOJSON_URL,
     TERRAIN_IMAGE_URLS,
-    TERRAIN_PATTERN_LAYER_IDS,
     defaultTerrainClass,
     type TerrainClass,
 } from "./terrainConfig";
@@ -267,19 +266,6 @@ export function setParticipation(
     }
 
     return next;
-}
-
-/** Hide patterns only while the camera is moving fast — underlays keep land filled. */
-export function setTerrainPatternsVisible(
-    map: MapLibreMap,
-    visible: boolean
-): void {
-    const value = visible ? "visible" : "none";
-    for (const id of TERRAIN_PATTERN_LAYER_IDS) {
-        if (!map.getLayer(id)) continue;
-        if (map.getLayoutProperty(id, "visibility") === value) continue;
-        map.setLayoutProperty(id, "visibility", value);
-    }
 }
 
 export function resetToSelectable(

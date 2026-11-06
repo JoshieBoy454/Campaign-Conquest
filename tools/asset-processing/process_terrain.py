@@ -1,12 +1,9 @@
 """
-Resize terrain textures to 1024², soft-seam edges, validate 3×3 tiling,
-and emit under frontend/public/terrain/.
+Resize terrain textures, soft-seam edges, and emit MapLibre fill-pattern tiles
+under frontend/public/terrain/*-tile.png.
 
-Reads corrected source names from frontend/src/assets/:
-  grassy_devastation.png
-  Desert_devastation.png  (or desert_devastation.png)
-  Icy_wasteland.png
-  hightech_city.png
+Place source PNGs next to this script (or set SRC) named:
+  grassy_devastation.png, desert_devastation.png, Icy_wasteland.png, hightech_city.png
 
 Usage:
   python tools/asset-processing/process_terrain.py
@@ -22,16 +19,16 @@ except ImportError as exc:  # pragma: no cover
     raise SystemExit("Install Pillow: pip install Pillow") from exc
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "frontend" / "src" / "assets"
+SRC = Path(__file__).resolve().parent / "terrain-sources"
 OUT = ROOT / "frontend" / "public" / "terrain"
-SIZE = 1024
-SEAM = 8
+SIZE = 128
+SEAM = 4
 
 MAPPING = [
-    (("grassy_devastation.png",), "grassy.png"),
-    (("Desert_devastation.png", "desert_devastation.png", "Deser_devastation.png"), "desert.png"),
-    (("Icy_wasteland.png", "Icy_wasteland .png"), "icy.png"),
-    (("hightech_city.png",), "city.png"),
+    (("grassy_devastation.png",), "grassy-tile.png"),
+    (("Desert_devastation.png", "desert_devastation.png", "Deser_devastation.png"), "desert-tile.png"),
+    (("Icy_wasteland.png", "Icy_wasteland .png"), "icy-tile.png"),
+    (("hightech_city.png",), "city-tile.png"),
 ]
 
 

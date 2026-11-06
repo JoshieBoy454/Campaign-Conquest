@@ -11,7 +11,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const input = join(root, "frontend", "public", "countries.geojson");
+// Place a full Natural Earth / similar countries.geojson next to this script as input.
+const input = join(root, "tools", "geo", "countries.geojson");
 const output = join(root, "frontend", "public", "countries.simplified.geojson");
 
 if (!existsSync(input)) {

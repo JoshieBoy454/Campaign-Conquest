@@ -30,13 +30,6 @@ export const TERRAIN_IMAGE_URLS: Record<
 
 export const COUNTRIES_GEOJSON_URL = "/countries.simplified.geojson";
 
-export const TERRAIN_PATTERN_LAYER_IDS = [
-    "terrain-grassy",
-    "terrain-desert",
-    "terrain-icy",
-    "terrain-city",
-] as const;
-
 export function defaultTerrainClass(iso: string): Exclude<TerrainClass, "city"> {
     const id = iso.toUpperCase();
     if (ICE_ISOS.has(id)) {
